@@ -1,0 +1,23 @@
+# AudioBridge: one room per interview, created by the backend through the API.
+
+general: {
+	# Required to create, edit or destroy rooms, and (lock_rtp_forward) to start RTP forwarders,
+	# so a browser holding a join token cannot create rooms or tap audio.
+	admin_key = "${AUDIOBRIDGE_ADMIN_KEY}"
+	lock_rtp_forward = true
+	# Rooms created through the API are not written back to this file.
+	string_ids = false
+}
+
+# Static room for the MVP-4 spike and manual testing only.
+room-1001: {
+	description = "Spike test room"
+	secret = "${SPIKE_ROOM_SECRET}"
+	sampling_rate = 48000
+	audiolevel_event = true
+	audio_active_packets = 50
+	audio_level_average = 40
+	# Spike prototype A: the bot joins as a plain-RTP participant (same host only).
+	allow_rtp_participants = true
+	record = false
+}

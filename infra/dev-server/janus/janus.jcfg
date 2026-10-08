@@ -1,0 +1,71 @@
+# Janus core configuration for the ResumeRound dev server.
+# Rendered by setup.sh: ${VARIABLES} are replaced from /etc/resumeround/secrets.env and the
+# instance metadata. Do not put real secrets in this file.
+
+general: {
+	configs_folder = "/etc/janus"
+	plugins_folder = "/usr/lib/x86_64-linux-gnu/janus/plugins"
+	transports_folder = "/usr/lib/x86_64-linux-gnu/janus/transports"
+	events_folder = "/usr/lib/x86_64-linux-gnu/janus/events"
+	loggers_folder = "/usr/lib/x86_64-linux-gnu/janus/loggers"
+
+	debug_level = 4
+	server_name = "ResumeRound Janus (dev)"
+
+	# janus.js keeps sessions alive every 25 s. A dropped client can reclaim its session within
+	# 60 s (PRD: reconnect within 60 s resumes the same interview).
+	session_timeout = 60
+	reclaim_session_timeout = 60
+
+	# Every Janus API request must carry a token signed with this secret. The backend issues
+	# short-lived tokens (PRD: short-lived join tokens), so the secret never reaches browsers.
+	token_auth = true
+	token_auth_secret = "${JANUS_TOKEN_SECRET}"
+
+	# Admin/monitoring API (listens on localhost only, see the HTTP transport).
+	admin_secret = "${JANUS_ADMIN_SECRET}"
+
+	protected_folders = [
+		"/bin", "/boot", "/dev", "/etc", "/initrd", "/lib", "/lib32", "/lib64",
+		"/proc", "/sbin", "/sys", "/usr", "/var",
+		"/opt/janus/bin", "/opt/janus/etc", "/opt/janus/include", "/opt/janus/lib",
+		"/opt/janus/lib32", "/opt/janus/lib64", "/opt/janus/sbin"
+	]
+}
+
+certificates: {
+	# DTLS certificate is generated automatically at startup.
+}
+
+media: {
+	# Must sit inside the UDP range open in the AWS security group (10000-10200).
+	# 10101-10200 is reserved for coturn relays.
+	rtp_port_range = "10000-10100"
+	dtls_mtu = 1200
+}
+
+nat: {
+	# The instance has a private IP behind AWS's 1:1 NAT; advertise the Elastic IP to browsers,
+	# and keep the private address too so processes on this host (the bot) can connect directly.
+	nat_1_1_mapping = "${PUBLIC_IP}"
+	keep_private_host = true
+	ice_ignore_list = "vmnet"
+}
+
+plugins: {
+	# Loaded: audiobridge (interviews), echotest (connectivity checks), textroom (captions),
+	# videoroom (kept for the AudioBridge-vs-VideoRoom decision).
+	disable = "libjanus_voicemail.so,libjanus_recordplay.so,libjanus_sip.so,libjanus_nosip.so,libjanus_streaming.so,libjanus_videocall.so,libjanus_lua.so,libjanus_duktape.so"
+}
+
+transports: {
+	disable = "libjanus_pfunix.so,libjanus_mqtt.so,libjanus_rabbitmq.so,libjanus_nanomsg.so"
+}
+
+loggers: {
+	disable = "libjanus_jsonlog.so"
+}
+
+events: {
+	broadcast = false
+}

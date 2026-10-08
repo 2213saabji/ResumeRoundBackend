@@ -443,15 +443,16 @@ current one, including any manual corrections. Warn the user before re-uploading
 4. **Upload resume:** `POST /resumes`, then poll `GET /resumes/:id`.
 5. **Review profile:** `GET /profiles/current`; editable chips per skill bucket, project cards;
    `PATCH /profiles/current` on save.
-6. **Ready to interview:** `POST /interviews` (section 7) shows the generated plan. The live
-   interview room itself comes in a later phase.
+6. **Ready to interview:** `POST /interviews` (section 7) shows the generated plan.
+7. **Interview (text):** `start` → `answers` loop (section 7.4). The live voice
+   room comes in a later phase.
 
 ---
 
-## 7. Interviews (available now, partial)
+## 7. Interviews
 
-These work today and are enough to build "create interview, see its plan, end it, report page
-skeleton". The actual question/answer loop is not available yet.
+Create an interview and see its plan (7.1-7.3), run it by typing answers (7.4), then read the
+report (7.5). The live voice call is a later phase.
 
 ### 7.1 Create
 
@@ -522,28 +523,267 @@ GET  /interviews/:id                      -> 200 { "interview": {...} }
 
 GET  /interviews/:id/turns?limit=20&cursor=<nextCursor>
      -> 200 { "items": [ turn, ... ], "nextCursor": "12" | null }
-     turn = { seq, objectiveIdx, questionText, answerText, evaluation, decision, askedAt, answeredAt }
-     (always empty until the interview loop ships)
+     turn = { seq, objectiveIdx, objectiveKind, isFollowUp, questionText, answerText,
+              evaluation, decision, askedAt, answeredAt }
+     (evaluation and decision are null until the interview has ended; this is the transcript /
+      history view only: never poll it to wait for a question, see 7.4)
 
 POST /interviews/:id/end                  -> 200 { "interview": { ..., "status": "ended" } }
      (safe to call more than once)
 
-GET  /interviews/:id/report
-     -> 409 CONFLICT                       interview not ended yet
-     -> 202 { "status": "generating" }     ended, report not ready: poll (Retry-After: 5)
-     -> 200 { "status": "ready", "report": {
-              "id", "interviewId", "dimensionScores": { "<dimension>": 0-10 }, "overall": 0-10,
-              "strengths": [], "weaknesses": [], "feedback": "",
-              "recommendations": [{ "topic", "reason", "resources": [{ "title", "url" }] }],
-              "createdAt" } }
+GET  /interviews/:id/report             see section 7.5
 ```
 
-Report dimensions will be: `technical_knowledge`, `problem_solving`, `system_design`,
-`communication`, `depth`, `production_thinking`.
-**Current status:** report generation is not built yet, so an ended interview stays at
-`202 generating`. Build the page against the shape above.
-
 There is no "list my interviews" endpoint yet.
+
+### 7.4 Text interview loop: `start` and `answers` (MVP-2)
+
+> **Status: live.** Both endpoints work as described below. With the backend's `AI_PROVIDER=mock`
+> (local default) the questions come from simple templates; with `AI_PROVIDER=anthropic` they are
+> written by the AI for each candidate. The request and response shapes are identical either way.
+
+**Why this replaces polling.** The backend does not create questions in the background. A question
+is created only when you call `start` (first question) or `answers` (every next question), and it
+comes back **in the response** of that call. Do **not** poll `GET /turns` to wait for a question:
+it only reads already-saved turns and will stay empty. Use `/turns` only for the transcript /
+history view.
+
+**How the interviewer works (what the user experiences).** Each question is written by the AI
+for this candidate: grounded in their own resume projects and matched to their level and
+experience (an SDE-1 and a Senior get different depth on the same topic). After every answer the
+AI judges it and picks the next move: dig deeper, ask for specifics when the answer was vague,
+raise the difficulty, give a hint, or move to the next topic in the plan. The backend keeps the
+interview on time and inside the candidate's level, and ends it when the plan or time runs out.
+Scores are **never shown during the interview**; they appear only in the report.
+
+#### Start the interview
+
+```
+POST /interviews/:id/start          (no body)
+-> 200 {
+  "interview": { ...interview object, "status": "in_progress", "startedAt": "..." },
+  "progress": { ...see "Progress object" below },
+  "currentTurn": {
+    "seq": 1,
+    "objectiveIdx": 0,
+    "objectiveKind": "warmup",
+    "questionText": "Let's start with your Payment Gateway project. Walk me through what it does and what you owned in it.",
+    "isFollowUp": false,
+    "askedAt": "2026-10-09T10:00:02.000Z"
+  }
+}
+```
+
+- Typically takes **1-4 seconds** (the AI writes the first question). Show an "Interviewer is
+  preparing your first question..." state.
+- **Safe to call again.** If the interview is already in progress (page reload, second tab), it
+  does not restart anything: it returns the current unanswered question with the same shape.
+- Starting also starts the interview clock (`startedAt`); see the timer notes below.
+
+#### Submit an answer, get the next question
+
+```
+POST /interviews/:id/answers
+{
+  "seq": 1,                       // seq of the question being answered (from currentTurn.seq)
+  "answerText": "It's a Node.js service that..."   // 1-5000 characters
+}
+-> 200 {
+  "interview": { ...interview object },
+  "progress": { ... },
+  "currentTurn": { "seq": 2, "objectiveIdx": 0, "objectiveKind": "warmup",
+                   "questionText": "You mentioned Redis caching at 2000 RPS. What happens to payments if Redis goes down?",
+                   "isFollowUp": true, "askedAt": "..." },
+  "closingMessage": null
+}
+```
+
+When the interview finishes (plan complete or time up), the same call returns:
+
+```json
+{
+  "interview": { "status": "ended", "endedAt": "..." },
+  "progress": { "...": "..." },
+  "currentTurn": null,
+  "closingMessage": "That's all from my side. Thanks for walking me through your work - your report will be ready shortly."
+}
+```
+
+- Typically takes **2-6 seconds** (the AI scores the answer, decides, and writes the next
+  question). Disable the input and show "Interviewer is thinking..." while waiting.
+- `isFollowUp: true` means the question continues the same thread (dig deeper, clarify, hint);
+  `false` means a new topic started. Optional UI touch: show a small "New topic: Fundamentals"
+  divider when `isFollowUp` is false.
+- When `currentTurn` is `null` and `interview.status` is `"ended"`: show `closingMessage`, then go
+  to the report page (`GET /interviews/:id/report`, which returns `202 generating` until ready).
+
+#### Progress object
+
+Returned by `start`, `answers` and `GET /interviews/:id`:
+
+```json
+{
+  "objectiveIdx": 1, // index into interview.plan
+  "objectiveCount": 6,
+  "objectiveKind": "project_deep_dive",
+  "questionsAsked": 4,
+  "elapsedSec": 412, // server-side, since startedAt
+  "remainingSec": 1388
+}
+```
+
+Use it for a progress bar ("Topic 2 of 6: Project deep dive") and the timer. Run the countdown
+locally from `remainingSec` and re-sync it from every response; the server's clock is the source
+of truth. When the time is up, the next `answers` call ends the interview. The **End interview**
+button calls `POST /interviews/:id/end` (section 7.3) at any time.
+
+#### Errors for `start` and `answers`
+
+| Case                                                                | Response                                                                                                  |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `answers` before `start`, or interview already ended                | `409 CONFLICT`                                                                                            |
+| `seq` is not the current question (stale tab, out-of-order request) | `409 CONFLICT` with `details.currentSeq`: call `start` to re-fetch the current question                   |
+| Empty answer or over 5000 characters                                | `400 VALIDATION_ERROR`                                                                                    |
+| The AI provider failed or timed out                                 | `503 SERVICE_UNAVAILABLE`: the answer is saved; **retry the exact same request** (same `seq`), it is safe |
+| Too many submissions                                                | `429 RATE_LIMITED` (30 answers per minute per user)                                                       |
+
+**Double submits are safe:** sending the same `seq` and `answerText` twice (double click, network
+retry) returns the same result instead of skipping a question. Still disable the send button
+while a request is in flight.
+
+#### Changes to existing endpoints (now live)
+
+- `GET /interviews/:id` returns the **same top-level shape as `start`**: `progress` and
+  `currentTurn` sit **next to** `interview`, not inside it. The `interview` object itself does not
+  change.
+
+  ```
+  GET /interviews/:id
+  -> 200 {
+    "interview": { ...interview object, unchanged },
+    "progress": { ... } | null,      // null while status is "created" (not started yet)
+    "currentTurn": { ... } | null    // the open question; null if not started or ended
+  }
+  ```
+
+  Code that reads only `data.interview` today keeps working unchanged.
+
+- `GET /interviews/:id/turns`: each turn adds `objectiveKind` and `isFollowUp`. While the interview
+  is in progress, `evaluation` and `decision` are always `null` (no scores mid-interview); they are
+  filled in after it ends.
+- Create interviews with `"mode": "text"` for now. `voice` interviews will also accept typed
+  answers until the live call (MVP-4) ships.
+
+#### Interview screen flow
+
+1. **Plan preview:** `POST /interviews` (or `GET /interviews/:id`); show the agenda from `plan`.
+2. **Start button:** `POST /interviews/:id/start` → show `currentTurn.questionText`, start the timer.
+3. **Answer box:** submit → `POST /interviews/:id/answers` with `{ seq: currentTurn.seq, answerText }`
+   → show the new `currentTurn`; append both to the chat-style history on screen.
+4. **Finished:** `currentTurn === null` → show `closingMessage` → report page.
+5. **End early:** `POST /interviews/:id/end` → report page.
+6. **Page reload:** check `GET /interviews/:id` first (this works today), then branch on
+   `interview.status`:
+   - `"in_progress"`: restore the screen. Either read `currentTurn` and `progress` from that same
+     response, or call `start` again. Both are supported and return the same open question.
+   - `"created"`: show the plan preview with the Start button. **Do not call `start` here
+     automatically**, because it starts the interview clock.
+   - `"ended"`: go to the report page (`start` would return `409`).
+
+   Load past turns with `GET /interviews/:id/turns` for the history view.
+
+```js
+// Minimal loop, using the api() client from section 3.6
+async function startInterview(id) {
+  const { data } = await api(`/interviews/${id}/start`, { method: 'POST' });
+  return data; // { interview, progress, currentTurn }
+}
+
+async function submitAnswer(id, seq, answerText) {
+  try {
+    const { data } = await api(`/interviews/${id}/answers`, {
+      method: 'POST',
+      body: { seq, answerText },
+    });
+    return data; // currentTurn === null -> interview ended
+  } catch (err) {
+    if (err.code === 'SERVICE_UNAVAILABLE') return submitAnswer(id, seq, answerText); // safe retry (add a limit/backoff)
+    if (err.code === 'CONFLICT') return startInterview(id); // resync to the current question
+    throw err;
+  }
+}
+```
+
+### 7.5 Report (MVP-3)
+
+> **Status: live.** The report is generated by the backend's job worker right after the interview
+> ends (usually within 30-60 seconds), so `npm run dev` must be running (it starts the worker).
+
+```
+GET /interviews/:id/report
+```
+
+| Response                                                     | Meaning                                                                    | UI                                                               |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `409 CONFLICT`                                               | The interview has not ended                                                | Should not happen from the report page; go back to the interview |
+| `202 { "status": "generating" }`                             | Being generated (`Retry-After: 5`)                                         | "Scoring your answers...", poll every 5 s                        |
+| `200 { "status": "ready", "report": {...} }`                 | Done                                                                       | Render the report                                                |
+| `200 { "status": "insufficient_answers", "message": "..." }` | Fewer than 2 answers were scored, so there is nothing meaningful to report | Show `message`; offer a new interview                            |
+| `200 { "status": "failed", "message": "..." }`               | Generation failed after retries                                            | Show `message` (written for users)                               |
+
+`ready`, `insufficient_answers` and `failed` are final: stop polling. Keep a safety cap on
+`generating` (for example 3 minutes, then "Your report is taking longer than usual, check back
+later"), but it should not normally be reached.
+
+The report object:
+
+```json
+{
+  "id": "6711...",
+  "interviewId": "6710...",
+  "overall": 6.4,
+  "dimensionScores": {
+    "technical_knowledge": 7.1,
+    "problem_solving": 6.0,
+    "system_design": 5.8,
+    "communication": 7.5,
+    "depth": 5.9,
+    "production_thinking": 6.2
+  },
+  "questionsAnswered": 18,
+  "strengths": ["Explained the Redis cache-aside flow precisely, including TTLs and invalidation"],
+  "weaknesses": ["Did not consider what happens to the database when the cache is cold"],
+  "feedback": "You explained your own design clearly... The most important thing to work on is...",
+  "recommendations": [
+    {
+      "topic": "Cache stampede and cold-start protection",
+      "reason": "When Redis went down in the scenario, the answer did not protect the database.",
+      "resources": [
+        { "title": "Redis docs: Client-side caching and key expiration", "url": null },
+        {
+          "title": "Hands-on: load-test a cache-aside service with the cache disabled",
+          "url": null
+        }
+      ]
+    }
+  ],
+  "createdAt": "2026-10-09T10:31:02.000Z"
+}
+```
+
+- **Scores** are 0-10 with one decimal. `dimensionScores` contains **only dimensions the
+  interview gave evidence for**: a dimension can be missing (for example no `system_design` in a
+  short interview). Render the ones present; do not show missing ones as 0.
+- Dimension labels: `technical_knowledge` Technical knowledge, `problem_solving` Problem solving,
+  `system_design` System design, `communication` Communication, `depth` Depth,
+  `production_thinking` Production thinking.
+- `strengths`, `weaknesses`: short sentences, each grounded in what the candidate said.
+- `feedback`: one or two paragraphs written to the candidate ("you"). Preserve line breaks.
+- `recommendations`: most important first. `resources[].url` is **always `null` for now** (the AI
+  suggests what to study, but does not invent links); show `title` as plain text.
+- For the per-question breakdown (question, answer, per-answer scores and evidence), use
+  `GET /interviews/:id/turns`: after the interview ends, each turn includes `evaluation` and
+  `decision`.
 
 ---
 
@@ -551,27 +791,37 @@ There is no "list my interviews" endpoint yet.
 
 ```
 GET /users/me/progress
--> 200 { "skills": [
-  { "skill": "postgresql", "latest": 6.5,
-    "points": [ { "score": 5, "at": "...", "interviewId": "..." }, { "score": 6.5, "at": "...", "interviewId": "..." } ] }
-] }
+-> 200 {
+  "overall": [ { "score": 5.8, "at": "...", "interviewId": "..." }, { "score": 6.4, ... } ],
+  "dimensions": [
+    { "dimension": "system_design", "latest": 6.1,
+      "points": [ { "score": 5.2, "at": "...", "interviewId": "..." }, { "score": 6.1, ... } ] }
+  ],
+  "skills": [
+    { "skill": "redis", "latest": 6.5,
+      "points": [ { "score": 5, "at": "...", "interviewId": "..." }, { "score": 6.5, ... } ] }
+  ]
+}
 ```
 
-`points` are oldest first (ready for a trend chart). Skill names are lower-case. This stays
-empty until reports are generated (MVP-3).
+- `overall`: one point per interview that has a report (last 20).
+- `dimensions`: score trend per dimension (PRD FR-8 progress view). A dimension appears once some
+  report has scored it.
+- `skills`: per technology from the interview plans (lower-case names, last 20 points each). These
+  also make the next interview focus on the weakest skills.
+- All `points` arrays are oldest first, ready for a trend chart. Everything is empty until the
+  first report has been generated.
 
 ---
 
 ## 9. What is not ready yet
 
-| Feature                                                      | Endpoint                       | Today                                        | Planned     |
-| ------------------------------------------------------------ | ------------------------------ | -------------------------------------------- | ----------- |
-| Live voice interview (Janus/WebRTC room, captions, barge-in) | `POST /interviews/:id/join`    | `501 NOT_IMPLEMENTED`                        | MVP-4       |
-| Text-mode answers / question loop                            | `POST /interviews/:id/answers` | `501 NOT_IMPLEMENTED`                        | MVP-2       |
-| Report generation                                            | `GET /interviews/:id/report`   | Stays `202 generating`                       | MVP-3       |
-| Google sign-in                                               | `POST /auth/google`            | `503` until `GOOGLE_CLIENT_ID` is configured | Config only |
-| List my resumes / interviews                                 | (none)                         | Not available                                | On request  |
-| Account deletion                                             | (none)                         | Not available                                | Later       |
+| Feature                                                      | Endpoint                    | Today                                        | Planned     |
+| ------------------------------------------------------------ | --------------------------- | -------------------------------------------- | ----------- |
+| Live voice interview (Janus/WebRTC room, captions, barge-in) | `POST /interviews/:id/join` | `501 NOT_IMPLEMENTED`                        | MVP-4       |
+| Google sign-in                                               | `POST /auth/google`         | `503` until `GOOGLE_CLIENT_ID` is configured | Config only |
+| List my resumes / interviews                                 | (none)                      | Not available                                | On request  |
+| Account deletion                                             | (none)                      | Not available                                | Later       |
 
 For the future interview room, plan on `janus.js` in the browser connecting to Janus directly;
 `POST /interviews/:id/join` will return the Janus URL, room id, a short-lived join token and ICE

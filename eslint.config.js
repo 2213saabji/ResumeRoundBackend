@@ -2,7 +2,7 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'coverage/**', 'node_modules/**', '.storage/**'] },
+  { ignores: ['dist/**', 'coverage/**', '**/node_modules/**', '.storage/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -15,6 +15,11 @@ export default tseslint.config(
       '@typescript-eslint/consistent-type-imports': 'error',
       'no-console': 'error',
     },
+  },
+  {
+    // Spikes are throwaway scripts that print their results.
+    files: ['spikes/**/*.ts'],
+    rules: { 'no-console': 'off' },
   },
   {
     files: ['ecosystem.config.cjs'],

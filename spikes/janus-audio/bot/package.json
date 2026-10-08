@@ -1,0 +1,21 @@
+{
+  "name": "janus-audio-spike-bot",
+  "private": true,
+  "type": "module",
+  "description": "MVP-4 spike: interview bot audio bridge prototypes (A: plain RTP, B: werift WebRTC)",
+  "scripts": {
+    "bot:a": "tsx run-bot.ts a",
+    "bot:b": "tsx run-bot.ts b",
+    "load": "tsx load-test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "opusscript": "^0.1.1",
+    "tsx": "^4.23.15",
+    "werift": "^0.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^6.0.3"
+  }
+}

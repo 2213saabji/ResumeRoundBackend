@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Janus Audio Spike</title>
+    <style>
+      :root {
+        --bg: #f7f7f8;
+        --fg: #1b1b1f;
+        --muted: #6b6b76;
+        --card: #ffffff;
+        --line: #e3e3e8;
+        --accent: #2f6fed;
+        --ok: #1f9d55;
+        --bad: #d64545;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #141417;
+          --fg: #ececf1;
+          --muted: #9a9aa6;
+          --card: #1d1d22;
+          --line: #2e2e36;
+          --accent: #6b9bff;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          14px/1.45 system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 860px;
+        margin: 0 auto;
+        display: grid;
+        gap: 12px;
+      }
+      section {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px;
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0;
+      }
+      h2 {
+        font-size: 14px;
+        margin: 0 0 8px;
+      }
+      p {
+        margin: 4px 0;
+        color: var(--muted);
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+      }
+      button {
+        background: var(--accent);
+        color: #fff;
+        border: 0;
+        border-radius: 7px;
+        padding: 7px 14px;
+        font: inherit;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      select,
+      input[type='number'] {
+        font: inherit;
+        padding: 5px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--fg);
+      }
+      input[type='number'] {
+        width: 80px;
+      }
+      .meter {
+        height: 10px;
+        background: var(--line);
+        border-radius: 5px;
+        overflow: hidden;
+        flex: 1;
+        min-width: 120px;
+      }
+      .meter > div {
+        height: 100%;
+        width: 0;
+        background: var(--ok);
+        transition: width 60ms linear;
+      }
+      .label {
+        width: 70px;
+        color: var(--muted);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-variant-numeric: tabular-nums;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 4px 6px;
+        border-bottom: 1px solid var(--line);
+      }
+      th {
+        color: var(--muted);
+        font-weight: 500;
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 6px 14px;
+      }
+      .stats b {
+        display: block;
+        font-size: 16px;
+      }
+      pre {
+        margin: 0;
+        max-height: 200px;
+        overflow: auto;
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--muted);
+      }
+      .bad {
+        color: var(--bad);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section>
+        <h1>Janus audio spike</h1>
+        <p>
+          Echo test: Janus sends your audio straight back (network + Janus only). Room 1001: you and
+          the bot share an AudioBridge room; stop talking and the bot replies. Use headphones.
+        </p>
+      </section>
+
+      <section class="row">
+        <select id="mode">
+          <option value="echo">Echo test</option>
+          <option value="room">Room 1001 (bot)</option>
+        </select>
+        <label><input type="checkbox" id="relay" /> Force TURN relay</label>
+        <label>Threshold dBFS <input type="number" id="threshold" value="-50" step="1" /></label>
+        <label>Bot hangover ms <input type="number" id="hangover" value="700" step="50" /></label>
+        <button id="start">Connect</button>
+        <button id="stop" disabled>Hang up</button>
+      </section>
+
+      <section>
+        <div class="row">
+          <span class="label">You</span>
+          <div class="meter"><div id="micBar"></div></div>
+        </div>
+        <div class="row" style="margin-top: 6px">
+          <span class="label">Remote</span>
+          <div class="meter"><div id="remoteBar"></div></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Connection</h2>
+        <div class="stats">
+          <div>State<b id="state">idle</b></div>
+          <div>Path<b id="path">-</b></div>
+          <div>Network RTT<b id="rtt">-</b></div>
+          <div>Jitter in<b id="jitter">-</b></div>
+          <div>Lost in<b id="lost">-</b></div>
+          <div>Jitter buffer<b id="jbuf">-</b></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Delays</h2>
+        <p id="delayHelp">
+          Echo: time from the start of your sound to the start of the echo (say "ta", clap).
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Your audio</th>
+              <th>Delay heard</th>
+              <th>Minus bot hangover</th>
+            </tr>
+          </thead>
+          <tbody id="delays"></tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Log</h2>
+        <pre id="log"></pre>
+      </section>
+    </main>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const log = (...a) => {
+        const line = `${new Date().toISOString().slice(11, 23)} ${a.join(' ')}`;
+        $('log').textContent = `${line}\n${$('log').textContent}`.slice(0, 20000);
+      };
+      const tx = () => Math.random().toString(36).slice(2, 12);
+
+      /** Minimal Janus WebSocket client: create session, attach, message, trickle, keepalive. */
+      class Janus {
+        constructor(url, token) {
+          this.url = url;
+          this.token = token;
+          this.pending = new Map();
+          this.onEvent = () => {};
+        }
+        connect() {
+          return new Promise((resolve, reject) => {
+            this.ws = new WebSocket(this.url, 'janus-protocol');
+            this.ws.onerror = () => reject(new Error('WebSocket error'));
+            this.ws.onclose = () => log('Janus WebSocket closed');
+            this.ws.onmessage = (e) => this.receive(JSON.parse(e.data));
+            this.ws.onopen = async () => {
+              try {
+                const res = await this.send({ janus: 'create' });
+                this.sessionId = res.data.id;
+                this.keepalive = setInterval(
+                  () => this.send({ janus: 'keepalive', session_id: this.sessionId }, true),
+                  25000,
+                );
+                resolve();
+              } catch (err) {
+                reject(err);
+              }
+            };
+          });
+        }
+        receive(msg) {
+          const p = msg.transaction && this.pending.get(msg.transaction);
+          if (p) {
+            if (msg.janus === 'ack' && !p.ackOnly) return;
+            this.pending.delete(msg.transaction);
+            if (msg.janus === 'error') return p.reject(new Error(msg.error.reason));
+            const err = msg.plugindata && msg.plugindata.data && msg.plugindata.data.error;
+            if (err) return p.reject(new Error(err));
+            return p.resolve(msg);
+          }
+          this.onEvent(msg);
+        }
+        send(msg, ackOnly = false) {
+          const transaction = tx();
+          return new Promise((resolve, reject) => {
+            this.pending.set(transaction, { resolve, reject, ackOnly });
+            this.ws.send(JSON.stringify({ ...msg, transaction, token: this.token }));
+          });
+        }
+        async attach(plugin) {
+          const res = await this.send({ janus: 'attach', session_id: this.sessionId, plugin });
+          const handleId = res.data.id;
+          return {
+            id: handleId,
+            message: (body, jsep) =>
+              this.send({
+                janus: 'message',
+                session_id: this.sessionId,
+                handle_id: handleId,
+                body,
+                jsep,
+              }),
+            trickle: (candidate) =>
+              this.send(
+                { janus: 'trickle', session_id: this.sessionId, handle_id: handleId, candidate },
+                true,
+              ),
+          };
+        }
+        close() {
+          clearInterval(this.keepalive);
+          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.send({ janus: 'destroy', session_id: this.sessionId }).catch(() => {});
+            setTimeout(() => this.ws.close(), 200);
+          }
+        }
+      }
+
+      /** RMS level of an analyser in dBFS. */
+      function levelDb(analyser, buf) {
+        analyser.getFloatTimeDomainData(buf);
+        let sum = 0;
+        for (const v of buf) sum += v * v;
+        return 10 * Math.log10(sum / buf.length + 1e-12);
+      }
+
+      let session = null;
+
+      async function start() {
+        $('start').disabled = true;
+        $('delays').innerHTML = '';
+        const mode = $('mode').value;
+        $('delayHelp').textContent =
+          mode === 'echo'
+            ? 'Echo: time from the start of your sound to the start of the echo (say "ta", clap).'
+            : 'Bot: time from the end of your speech to the start of the reply. "Minus bot hangover" removes the silence the bot waits for before deciding you finished.';
+        try {
+          const cfg = await (await fetch('/config')).json();
+          const mic = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          });
+          const pc = new RTCPeerConnection({
+            iceServers: cfg.iceServers,
+            iceTransportPolicy: $('relay').checked ? 'relay' : 'all',
+          });
+          mic.getTracks().forEach((t) => pc.addTrack(t, mic));
+
+          const janus = new Janus(cfg.wsUrl, cfg.token);
+          await janus.connect();
+          log('Janus session', janus.sessionId);
+          const plugin = mode === 'echo' ? 'janus.plugin.echotest' : 'janus.plugin.audiobridge';
+          const handle = await janus.attach(plugin);
+
+          pc.onicecandidate = (e) =>
+            handle
+              .trickle(e.candidate ? e.candidate.toJSON() : { completed: true })
+              .catch(() => {});
+          pc.onconnectionstatechange = () => {
+            $('state').textContent = pc.connectionState;
+            log('PeerConnection', pc.connectionState);
+          };
+          janus.onEvent = (msg) => {
+            if (msg.janus === 'trickle') {
+              if (!msg.candidate.completed) pc.addIceCandidate(msg.candidate).catch(() => {});
+            } else if (
+              msg.janus === 'webrtcup' ||
+              msg.janus === 'hangup' ||
+              msg.janus === 'slowlink'
+            ) {
+              log('Janus', msg.janus, msg.reason || '');
+            } else if (msg.plugindata) {
+              const d = msg.plugindata.data;
+              if (d.audiobridge === 'talking' || d.audiobridge === 'stopped-talking') return;
+              log('event', JSON.stringify(d).slice(0, 200));
+            }
+          };
+
+          const audio = new Audio();
+          audio.autoplay = true;
+          const ctx = new AudioContext();
+          const remoteReady = new Promise((resolve) => {
+            pc.ontrack = (e) => {
+              const stream = e.streams[0] || new MediaStream([e.track]);
+              audio.srcObject = stream;
+              resolve(stream);
+            };
+          });
+
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          const body =
+            mode === 'echo'
+              ? { audio: true, video: false }
+              : { request: 'join', room: cfg.room, display: 'browser', muted: false };
+          const res = await handle.message(body, { type: offer.type, sdp: offer.sdp });
+          if (!res.jsep) throw new Error('Janus sent no answer');
+          await pc.setRemoteDescription(res.jsep);
+          log('Joined', mode === 'echo' ? 'echo test' : `room ${cfg.room}`);
+
+          const remote = await remoteReady;
+          session = { janus, pc, mic, ctx, audio, timers: [] };
+          measure(mode, mic, remote);
+          $('stop').disabled = false;
+        } catch (err) {
+          log('FAILED', err.message);
+          $('state').textContent = 'failed';
+          stop();
+        }
+      }
+
+      function measure(mode, mic, remote) {
+        const { ctx } = session;
+        const make = (stream) => {
+          const a = ctx.createAnalyser();
+          a.fftSize = 512;
+          ctx.createMediaStreamSource(stream).connect(a);
+          return a;
+        };
+        const micA = make(mic);
+        const remA = make(remote);
+        const buf = new Float32Array(512);
+        let localOn = false;
+        let localStart = 0;
+        let localLast = 0;
+        let remoteOn = false;
+        let remoteLastLoud = 0;
+        let pendingLocal = null;
+        let n = 0;
+
+        const tick = () => {
+          const now = performance.now();
+          const th = Number($('threshold').value);
+          const l = levelDb(micA, buf);
+          const r = levelDb(remA, buf);
+          $('micBar').style.width = `${Math.max(0, Math.min(100, (l + 70) * 1.6))}%`;
+          $('remoteBar').style.width = `${Math.max(0, Math.min(100, (r + 70) * 1.6))}%`;
+
+          if (l > th) {
+            if (!localOn) {
+              localOn = true;
+              localStart = now;
+            }
+            localLast = now;
+          } else if (localOn && now - localLast > 150) {
+            localOn = false;
+            if (localLast - localStart > 60) pendingLocal = { start: localStart, end: localLast };
+          }
+          // A remote onset is the first loud frame after at least 300 ms of remote silence.
+          if (r > th) {
+            if (!remoteOn && now - remoteLastLoud > 300) onRemoteOnset(now);
+            remoteOn = true;
+            remoteLastLoud = now;
+          } else if (now - remoteLastLoud > 300) {
+            remoteOn = false;
+          }
+        };
+
+        const onRemoteOnset = (now) => {
+          const ref =
+            mode === 'echo' ? (localOn ? { start: localStart } : pendingLocal) : pendingLocal;
+          if (!ref) return;
+          const from = mode === 'echo' ? ref.start : ref.end;
+          if (!from || now - from > 8000) return;
+          const delay = Math.round(now - from);
+          const hang = mode === 'echo' ? null : delay - Number($('hangover').value);
+          const spoke = ref.end ? `${Math.round(ref.end - ref.start)} ms` : 'speaking';
+          n++;
+          $('delays').insertAdjacentHTML(
+            'afterbegin',
+            `<tr><td>${n}</td><td>${spoke}</td><td>${delay} ms</td><td>${hang === null ? '-' : hang + ' ms'}</td></tr>`,
+          );
+          pendingLocal = null;
+        };
+
+        session.timers.push(setInterval(tick, 10));
+        session.timers.push(setInterval(() => stats(session.pc), 1000));
+      }
+
+      async function stats(pc) {
+        const report = await pc.getStats();
+        let pair;
+        report.forEach((s) => {
+          if (s.type === 'transport' && s.selectedCandidatePairId)
+            pair = report.get(s.selectedCandidatePairId);
+        });
+        if (!pair)
+          report.forEach((s) => {
+            if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded') pair = s;
+          });
+        if (pair) {
+          const local = report.get(pair.localCandidateId);
+          const remote = report.get(pair.remoteCandidateId);
+          $('path').textContent =
+            `${local.candidateType} -> ${remote.candidateType} (${local.protocol})`;
+          if (pair.currentRoundTripTime !== undefined)
+            $('rtt').textContent = `${Math.round(pair.currentRoundTripTime * 1000)} ms`;
+        }
+        report.forEach((s) => {
+          if (s.type === 'inbound-rtp' && s.kind === 'audio') {
+            $('jitter').textContent = `${Math.round((s.jitter || 0) * 1000)} ms`;
+            $('lost').textContent = `${s.packetsLost || 0} / ${s.packetsReceived || 0}`;
+            if (s.jitterBufferEmittedCount)
+              $('jbuf').textContent =
+                `${Math.round((s.jitterBufferDelay / s.jitterBufferEmittedCount) * 1000)} ms`;
+          }
+        });
+      }
+
+      function stop() {
+        if (session) {
+          session.timers.forEach(clearInterval);
+          session.pc.close();
+          session.mic.getTracks().forEach((t) => t.stop());
+          session.ctx.close();
+          session.audio.srcObject = null;
+          session.janus.close();
+          session = null;
+          $('state').textContent = 'closed';
+        }
+        $('start').disabled = false;
+        $('stop').disabled = true;
+      }
+
+      $('start').onclick = start;
+      $('stop').onclick = stop;
+    </script>
+  </body>
+</html>

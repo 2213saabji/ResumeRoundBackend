@@ -67,7 +67,7 @@ src/
     interviews/  REST + engine/ (planner, state machine, turn controller - pure, unit-tested)
     questions/   question bank + rubrics models, Atlas Vector Search retrieval
     evaluations/ rubric scoring maths
-    reports/     report model + read path (generation job: MVP-3)
+    reports/     report job: scores aggregated in code, narrative by the AI, skill history
     progress/    skill history across interviews
     ai/          AI gateway: providers (anthropic, mock), prompts, cost meter
     jobs/        MongoDB job queue + worker loop
@@ -114,14 +114,16 @@ Anthropic's server-side refusal fallback. Every call records tokens and USD cost
 
 Feature-by-feature detail, deviations and pending setup: [docs/STATUS.md](docs/STATUS.md).
 
-| Milestone                 | State                                                                                                                                   |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| MVP-1 Resume intelligence | Done: auth (email/password, Google, refresh rotation), onboarding, upload, parse job, editable profile                                  |
-| MVP-2 Text interview      | Plan generation, turn controller and state machine done; question bank seed, evaluator and `POST /interviews/:id/answers` pending (501) |
-| MVP-3 Evaluation report   | Report/skill-history models and read endpoints done; `report.generate` job pending                                                      |
-| MVP-4 Live call           | Janus HTTP client + bot registry/heartbeat done; `POST /interviews/:id/join`, RTP/WebRTC bridge, STT/TTS pending (501)                  |
+| Milestone                 | State                                                                                                                                     |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| MVP-1 Resume intelligence | Done: auth (email/password, Google, refresh rotation), onboarding, upload, parse job, editable profile                                    |
+| MVP-2 Text interview      | Typed interview works end to end: `POST /interviews/:id/start` and `/answers` (AI question + scoring + controller); question bank pending |
+| MVP-3 Evaluation report   | Report job, report API (ready / generating / insufficient answers / failed), skill history and progress trends done                       |
+| MVP-4 Live call           | Janus HTTP client + bot registry/heartbeat done; `POST /interviews/:id/join`, RTP/WebRTC bridge, STT/TTS pending (501)                    |
 
 ## Deployment
+
+Infrastructure decisions, costs and the cost-optimisation checklist: [docs/DEVOPS.md](docs/DEVOPS.md).
 
 API, worker and bot run as plain Node.js processes under PM2 on a Linux VM (no Docker):
 

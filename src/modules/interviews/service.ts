@@ -10,7 +10,8 @@ import { usersRepository } from '../users/repository.js';
 import { buildPlan } from './engine/planner.js';
 import type { Interview, InterviewTurn } from './model.js';
 import { interviewsRepository } from './repository.js';
-import type { CreateInterviewInput } from './schemas.js';
+import { findCurrentTurn, interviewLoop, toProgress, toPublicCurrentTurn } from './loop.js';
+import type { CreateInterviewInput, SubmitAnswerInput } from './schemas.js';
 
 export function toPublicInterview(i: Interview) {
   return {
@@ -34,16 +35,29 @@ export function toPublicInterview(i: Interview) {
   };
 }
 
-function toPublicTurn(t: InterviewTurn) {
+/** Scores and decisions stay hidden until the interview has ended. */
+function toPublicTurn(t: InterviewTurn, revealScores: boolean) {
   return {
     seq: t.seq,
     objectiveIdx: t.objectiveIdx,
+    objectiveKind: t.objectiveKind ?? null,
+    isFollowUp: t.isFollowUp ?? false,
     questionText: t.questionText,
     answerText: t.answerText ?? null,
-    evaluation: t.evaluation ?? null,
-    decision: t.decision ?? null,
+    evaluation: revealScores && t.evaluation?.overall !== undefined ? t.evaluation : null,
+    decision: revealScores && t.decision?.move ? t.decision : null,
     askedAt: t.askedAt ?? null,
     answeredAt: t.answeredAt ?? null,
+  };
+}
+
+/** Shape shared by GET /interviews/:id, start and answers. */
+async function view(i: Interview) {
+  const turn = await findCurrentTurn(i);
+  return {
+    interview: toPublicInterview(i),
+    progress: toProgress(i),
+    currentTurn: turn ? toPublicCurrentTurn(turn) : null,
   };
 }
 
@@ -116,6 +130,7 @@ export const interviewsService = {
         questionsAsked: 0,
         strengths: [],
         weaknesses: [],
+        coveredConcepts: [],
         runningScores: {},
       },
     });
@@ -123,18 +138,33 @@ export const interviewsService = {
   },
 
   async get(userId: string, id: string) {
-    return toPublicInterview(await getOwned(userId, id));
+    return view(await getOwned(userId, id));
+  },
+
+  /** Starts the interview and returns the first question (idempotent). */
+  async start(userId: string, id: string) {
+    return view(await interviewLoop.start(await getOwned(userId, id)));
+  },
+
+  /** Scores an answer and returns the next question, or the closing message. */
+  async submitAnswer(userId: string, id: string, input: SubmitAnswerInput) {
+    const { interview, closingMessage } = await interviewLoop.submitAnswer(
+      await getOwned(userId, id),
+      input.seq,
+      input.answerText,
+    );
+    return { ...(await view(interview)), closingMessage };
   },
 
   async listTurns(userId: string, id: string, cursor: string | undefined, limit: number) {
-    await getOwned(userId, id);
+    const interview = await getOwned(userId, id);
     const afterSeq = cursor ? Number.parseInt(cursor, 10) : 0;
     if (!Number.isFinite(afterSeq) || afterSeq < 0) throw Errors.badRequest('Invalid cursor');
 
     const turns = await interviewsRepository.listTurns(id, afterSeq, limit + 1);
     const page = turns.slice(0, limit);
     const result: Page<ReturnType<typeof toPublicTurn>> = {
-      items: page.map(toPublicTurn),
+      items: page.map((t) => toPublicTurn(t, interview.status === 'ended')),
       nextCursor: turns.length > limit ? String(page[page.length - 1]!.seq) : null,
     };
     return result;
@@ -158,6 +188,6 @@ export const interviewsService = {
   async getReport(userId: string, id: string) {
     const interview = await getOwned(userId, id);
     if (interview.status !== 'ended') throw Errors.conflict('The interview has not ended yet');
-    return reportsService.findForInterview(id);
+    return reportsService.getState(interview);
   },
 };

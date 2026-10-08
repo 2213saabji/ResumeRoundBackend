@@ -1,0 +1,4 @@
+# EchoTest: sends your own audio back. Used to check browser -> Janus connectivity.
+
+general: {
+}

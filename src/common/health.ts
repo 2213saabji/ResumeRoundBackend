@@ -17,7 +17,9 @@ healthRouter.get('/readyz', async (_req, res) => {
     janus: 'skipped',
   };
   if (config.JANUS_HTTP_URL) {
-    checks.janus = await new JanusClient(config.JANUS_HTTP_URL)
+    checks.janus = await new JanusClient(config.JANUS_HTTP_URL, {
+      tokenSecret: config.JANUS_TOKEN_SECRET,
+    })
       .info()
       .then(() => 'ok' as const)
       .catch(() => 'fail' as const);

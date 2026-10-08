@@ -18,5 +18,6 @@
     "sourceMap": true,
     "noEmit": true
   },
-  "include": ["src", "test", "vitest.config.ts"]
+  "include": ["src", "test", "spikes", "vitest.config.ts"],
+  "exclude": ["spikes/janus-audio/bot"]
 }

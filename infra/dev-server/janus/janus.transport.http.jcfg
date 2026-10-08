@@ -1,0 +1,24 @@
+# Janus HTTP transport: used by the backend API to create and destroy rooms.
+# Port 8088 is open only to developer IPs in the AWS security group, and every request needs a
+# signed token (token_auth in janus.jcfg).
+
+general: {
+	json = "compact"
+	base_path = "/janus"
+	http = true
+	port = 8088
+	https = false
+}
+
+admin: {
+	# Admin/monitoring API: localhost only. Reach it through an SSH tunnel when needed:
+	#   ssh -L 7088:127.0.0.1:7088 ubuntu@<server>
+	admin_base_path = "/admin"
+	admin_http = true
+	admin_port = 7088
+	admin_ip = "127.0.0.1"
+	admin_https = false
+}
+
+cors: {
+}

@@ -1,0 +1,7 @@
+# VideoRoom: kept loaded for the AudioBridge-vs-VideoRoom decision (PRD open question).
+# No static rooms; creating rooms requires the admin key.
+
+general: {
+	admin_key = "${VIDEOROOM_ADMIN_KEY}"
+	string_ids = false
+}

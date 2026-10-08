@@ -1,0 +1,4 @@
+# Files that run or are read on Linux servers must keep LF line endings.
+*.sh    text eol=lf
+*.jcfg  text eol=lf
+*.conf  text eol=lf

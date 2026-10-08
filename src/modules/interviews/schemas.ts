@@ -15,4 +15,12 @@ export const createInterviewSchema = z
 
 export const listTurnsQuerySchema = cursorQuerySchema;
 
+export const submitAnswerSchema = z
+  .object({
+    seq: z.number().int().min(1),
+    answerText: z.string().trim().min(1, 'Answer cannot be empty').max(5000),
+  })
+  .strict();
+
 export type CreateInterviewInput = z.infer<typeof createInterviewSchema>;
+export type SubmitAnswerInput = z.infer<typeof submitAnswerSchema>;

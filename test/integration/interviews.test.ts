@@ -130,6 +130,6 @@ describe('interviews', () => {
   it('exposes empty progress for a new user', async () => {
     const res = await request(app).get('/api/v1/users/me/progress').set(user.auth);
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ skills: [] });
+    expect(res.body).toEqual({ skills: [], dimensions: [], overall: [] });
   });
 });

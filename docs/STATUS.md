@@ -1,6 +1,6 @@
 # Backend Status: What Is Integrated and What Is Pending
 
-Last updated: 08 Oct 2026. Measured against the PRD (_AI Resume-Based Interview Simulator_) and the
+Last updated: 09 Oct 2026 (MVP-2 text interview loop and MVP-3 reports added). Measured against the PRD (_AI Resume-Based Interview Simulator_) and the
 _Backend Base Document_.
 
 **Legend:** ✅ Done (built and covered by tests) · 🟡 Partial (some parts built; the rest is listed) ·
@@ -8,15 +8,15 @@ _Backend Base Document_.
 
 ## 1. Summary by milestone
 
-| Milestone                          | State | In one line                                                                                   |
-| ---------------------------------- | ----- | --------------------------------------------------------------------------------------------- |
-| MVP-1 Resume intelligence (wk 1-3) | ✅    | Auth, onboarding, upload, parse job, editable profile all work end to end                     |
-| MVP-2 Text interview (wk 4-6)      | 🟡    | Planner + turn controller + state machine done; question bank, evaluator, answer loop pending |
-| MVP-3 Evaluation report (wk 7-8)   | 🟡    | Report storage and read API done; report generation job and skill-history writes pending      |
-| MVP-4 Live call (wk 9-12)          | ⬜    | Only a Janus HTTP client and bot heartbeat exist; no Janus server, no audio                   |
-| Phase 2 / Phase 3                  | ⬜    | Not started (by plan)                                                                         |
+| Milestone                          | State | In one line                                                                                                              |
+| ---------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------ |
+| MVP-1 Resume intelligence (wk 1-3) | ✅    | Auth, onboarding, upload, parse job, editable profile all work end to end                                                |
+| MVP-2 Text interview (wk 4-6)      | 🟡    | Typed interview works end to end (`start` / `answers`, AI questions + scoring); question bank and real-AI tuning pending |
+| MVP-3 Evaluation report (wk 7-8)   | 🟡    | Report job, report API, skill history and progress trends done; re-score check on 30 transcripts pending (needs real AI) |
+| MVP-4 Live call (wk 9-12)          | 🔧    | Dev Janus + coturn server running; spike done ([report](spikes/janus-audio-bridge.md)); join API and bot not built yet   |
+| Phase 2 / Phase 3                  | ⬜    | Not started (by plan)                                                                                                    |
 
-Verification today: 60 automated tests pass (unit + integration on an in-memory MongoDB replica
+Verification today: 93 automated tests pass (unit + integration on an in-memory MongoDB replica
 set); typecheck, lint and production build are clean. The API has booted against the Atlas
 cluster once successfully.
 
@@ -51,7 +51,7 @@ cluster once successfully.
 | Item                                                        | State | Notes                                                                                      |
 | ----------------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------ |
 | Ordered plan from profile + role + level + company type     | ✅    | Warm-up, core project deep dive, fundamentals, design/debugging (SDE-2+), behavioral close |
-| Uses past skill scores (weak topics first)                  | ✅    | Reads `skill_history`, which nothing writes yet (see FR-8)                                 |
+| Uses past skill scores (weak topics first)                  | ✅    | Reads `skill_history`, written by each report (see FR-8)                                   |
 | Difficulty inside the level band, time budget per objective | ✅    |                                                                                            |
 | Plan stored on the interview                                | ✅    |                                                                                            |
 | Controller re-orders the plan mid-interview                 | ⬜    |                                                                                            |
@@ -61,27 +61,33 @@ cluster once successfully.
 
 | Item                                                                               | State | Notes                                                      |
 | ---------------------------------------------------------------------------------- | ----- | ---------------------------------------------------------- |
-| Janus HTTP client (create/destroy AudioBridge room with secret + PIN)              | 🔧    | Written; never run against a Janus server                  |
+| Janus HTTP client (create/destroy AudioBridge room with secret + PIN)              | ✅    | Signed tokens + admin key; checked against the dev server  |
 | `/readyz` checks Janus reachability                                                | ✅    | Skipped while `JANUS_HTTP_URL` is empty                    |
 | Bot process registers + heartbeats every 5 s                                       | ✅    | `bot_instances` collection; least-loaded selection written |
 | `POST /interviews/:id/join` (room, bot assignment, join token, ICE servers)        | ⬜    | Returns 501                                                |
-| Bot joins the room and receives/publishes audio (RTP forward vs Node WebRTC spike) | ⬜    |                                                            |
+| Bot joins the room and receives/publishes audio (RTP forward vs Node WebRTC spike) | 🔧    | Spike done: use a WebRTC peer (werift); production bot TBD |
 | Streaming STT / TTS, VAD and push-to-talk, barge-in                                | ⬜    | STT/TTS providers not chosen (PRD open question)           |
 | Live captions and turn state over the data channel                                 | ⬜    |                                                            |
-| Text fallback answers (`POST /interviews/:id/answers`)                             | ⬜    | Returns 501                                                |
+| Text fallback answers (`POST /interviews/:id/answers`)                             | ✅    | The MVP-2 text loop (see FR-5)                             |
 | Reconnect within 60 s; bot failover from stale heartbeat                           | ⬜    | Data fields and indexes exist; logic not written           |
 
-### FR-5 Adaptive interviewer: 🟡
+### FR-5 Adaptive interviewer: ✅ (text) / 🔧 (real AI)
 
-| Item                                                                                                   | State | Notes                                                                 |
-| ------------------------------------------------------------------------------------------------------ | ----- | --------------------------------------------------------------------- |
-| Turn state machine (asking → listening → evaluating → deciding → …)                                    | ✅    | Illegal transitions throw                                             |
-| Controller rules: max 3 follow-ups, ±2 difficulty in band, hints, time budgets, low-confidence clarify | ✅    | Pure TypeScript, no LLM, unit-tested                                  |
-| Per-turn checkpoint with optimistic locking (`version`)                                                | ✅    | Repository method exists; nothing calls it yet                        |
-| Question phrasing grounded in the candidate's projects (LLM, streamed)                                 | ⬜    |                                                                       |
-| Answer evaluation against rubric (LLM, JSON)                                                           | ⬜    | Weighted rubric scoring maths is done                                 |
-| Step-by-step scenario reveals                                                                          | 🟡    | Data model and controller move exist; no scenario content or flow yet |
-| The actual turn loop that ties these together                                                          | ⬜    | The core of MVP-2                                                     |
+| Item                                                                                                                                            | State | Notes                                                                                                                                                  |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST /interviews/:id/start`: first question in the response (idempotent, race-safe)                                                            | ✅    | Interview clock starts when the first question is ready                                                                                                |
+| `POST /interviews/:id/answers`: score → decide → next question, or end                                                                          | ✅    | Double submits replay; stale `seq` → 409 with `currentSeq`; AI failure → 503, safe retry                                                               |
+| Turn state machine (asking → listening → evaluating → deciding → …)                                                                             | ✅    | Illegal transitions throw                                                                                                                              |
+| Controller rules: max 3 follow-ups, ±2 difficulty in band, hints, time budgets, low-confidence clarify                                          | ✅    | Hard rules always win                                                                                                                                  |
+| Evaluator LLM suggests the move and difficulty change; controller applies it within limits                                                      | ✅    | Falls back to score-based rules without a suggestion                                                                                                   |
+| Question writing grounded in the candidate's projects, level and experience (LLM)                                                               | 🔧    | Small model, structured "question spec" (question + hidden expected concepts + strong-answer description). Prompt written; not yet run with a real key |
+| Answer evaluation against the question's checklist (LLM, JSON)                                                                                  | 🔧    | Mid model: dimension scores, confidence, vagueness, covered/missed concepts, evidence quotes. Not yet run with a real key                              |
+| Per-turn checkpoint with optimistic locking (`version`), atomic per turn                                                                        | ✅    | Turn result, next question and state commit in one transaction                                                                                         |
+| Never repeats a question: asked questions go to the AI; an exact or near repeat is regenerated once, then the interview moves to the next topic | ✅    | Also applies to the mock interviewer                                                                                                                   |
+| No scores shown mid-interview                                                                                                                   | ✅    | `/turns` hides evaluation and decision until the interview ends                                                                                        |
+| Time-up and plan-complete endings, closing message, report job queued                                                                           | ✅    | `endReason` `timeout` / `completed`                                                                                                                    |
+| Step-by-step scenario reveals                                                                                                                   | 🟡    | Move exists and the AI is told how to reveal; no curated scenario content yet (question bank)                                                          |
+| Streamed question phrasing for voice                                                                                                            | ⬜    | MVP-4 (text mode returns whole questions)                                                                                                              |
 
 ### FR-6 Question bank: 🟡
 
@@ -94,25 +100,29 @@ cluster once successfully.
 | Seed of ~300 questions and rubrics                                                                                         | ⬜    |                                                                            |
 | Admin CRUD (`/questions`)                                                                                                  | ⬜    | `admin` user role and `requireRole` middleware exist                       |
 
-### FR-7 Evaluation and report: 🟡
+### FR-7 Evaluation and report: ✅ (real AI: 🔧)
 
-| Item                                                                                       | State | Notes                                      |
-| ------------------------------------------------------------------------------------------ | ----- | ------------------------------------------ |
-| Report model (dimension scores, overall, strengths, weaknesses, feedback, recommendations) | ✅    |                                            |
-| `GET /interviews/:id/report` (409 not ended / 202 generating / 200 ready)                  | ✅    |                                            |
-| Ending an interview queues the report job atomically                                       | ✅    | Idempotent                                 |
-| `report.generate` job (aggregate turns, LLM report, write skill history)                   | ⬜    | Job fails immediately as "not implemented" |
-| Turn transcript endpoint (`GET /interviews/:id/turns`)                                     | ✅    | Empty until turns exist                    |
-| Audio recording (opt-in)                                                                   | ⬜    | Storage key field exists                   |
+| Item                                                                                                     | State | Notes                                                                               |
+| -------------------------------------------------------------------------------------------------------- | ----- | ----------------------------------------------------------------------------------- |
+| Each answer scored per rubric dimension with evidence quotes                                             | ✅    | Done per turn in MVP-2 (evaluator)                                                  |
+| `report.generate` job, queued atomically when the interview ends                                         | ✅    | Idempotent; retries transient AI errors; dead-letters refusals                      |
+| Final scores computed in code (confidence-weighted), never by the LLM                                    | ✅    | Same transcript → same numbers (PRD consistency target)                             |
+| Narrative (strengths, weaknesses, feedback, recommendations) by the large model                          | 🔧    | Prompt written; tested with the mock only. Study suggestions have no URLs by design |
+| Report, skill history and report status written in one transaction                                       | ✅    |                                                                                     |
+| `GET /interviews/:id/report`: 409 not ended / 202 generating / 200 ready, insufficient_answers or failed | ✅    | Fewer than 2 scored answers → `insufficient_answers`                                |
+| Interviews that ended before reports existed get a report on first view                                  | ✅    | Queued exactly once                                                                 |
+| Report within 60 s of interview end                                                                      | 🟡    | Depends on the worker polling interval and model latency; to measure with real AI   |
+| Re-score delta ≤ 0.5 on 30 golden transcripts                                                            | ⬜    | Exit criterion of MVP-3; needs the real evaluator                                   |
+| Audio recording (opt-in)                                                                                 | ⬜    | MVP-4                                                                               |
 
-### FR-8 Interview memory: 🟡
+### FR-8 Interview memory: ✅ (basic)
 
-| Item                                         | State | Notes                          |
-| -------------------------------------------- | ----- | ------------------------------ |
-| `skill_history` collection                   | ✅    |                                |
-| Progress endpoint (`GET /users/me/progress`) | ✅    | Returns per-skill trend points |
-| Planner weights weak/mastered topics         | ✅    |                                |
-| Writing scores after each interview          | ⬜    | Part of the report job (FR-7)  |
+| Item                                                           | State | Notes                                                   |
+| -------------------------------------------------------------- | ----- | ------------------------------------------------------- |
+| Skill scores written per technology after each report          | ✅    | `skill_history`, same transaction as the report         |
+| Planner weights weak/mastered topics                           | ✅    | Next interview's fundamentals target the weakest skills |
+| Progress endpoint: overall, per-dimension and per-skill trends | ✅    | `GET /users/me/progress`                                |
+| Full interview memory (PRD P1)                                 | ⬜    | Phase 2                                                 |
 
 ### FR-9 to FR-12 (coding mode, design canvas, trends, company-style mode): ⬜
 
@@ -129,13 +139,14 @@ Phase 2 and Phase 3 by plan. Nothing built. The question model already has `sour
 | `POST /resumes`, `GET /resumes/:id`                    | ✅    | `Idempotency-Key` supported on POST                              |
 | `GET / PATCH /profiles/current`                        | ✅    |                                                                  |
 | `POST /interviews`                                     | ✅    | Builds the plan; monthly free quota; `Idempotency-Key` supported |
-| `GET /interviews/:id`                                  | ✅    |                                                                  |
+| `GET /interviews/:id`                                  | ✅    | Returns `{ interview, progress, currentTurn }`                   |
 | `GET /interviews/:id/turns`                            | ✅    | Cursor pagination                                                |
 | `POST /interviews/:id/end`                             | ✅    |                                                                  |
-| `GET /interviews/:id/report`                           | 🟡    | Stays 202 until the report job exists                            |
-| `GET /users/me/progress`                               | ✅    | Empty until reports write skill history                          |
+| `GET /interviews/:id/report`                           | ✅    | ready / generating / insufficient_answers / failed               |
+| `GET /users/me/progress`                               | ✅    | Overall, dimension and skill trends                              |
 | `POST /interviews/:id/join`                            | ⬜    | 501                                                              |
-| `POST /interviews/:id/answers`                         | ⬜    | 501                                                              |
+| `POST /interviews/:id/start`                           | ✅    | MVP-2                                                            |
+| `POST /interviews/:id/answers`                         | ✅    | MVP-2; 30 per minute per user                                    |
 | `GET /questions` (admin CRUD)                          | ⬜    | Route not created                                                |
 | `GET /healthz`, `GET /readyz`                          | ✅    |                                                                  |
 | Account / data deletion                                | ⬜    | Required by the privacy NFR                                      |
@@ -156,7 +167,7 @@ The frontend contract for everything marked ✅ is in [FRONTEND_INTEGRATION.md](
 | Latency targets      | ⬜    | —                                                                                                                                                                                                                            | Nothing to measure until the live loop exists                                                                         |
 | Availability / scale | ⬜    | Stateless API, horizontally scalable                                                                                                                                                                                         | Load tests (k6), bot capacity test                                                                                    |
 | Privacy              | 🟡    | Resume raw text excluded from default reads                                                                                                                                                                                  | Account deletion, audio encryption/opt-in (with recording)                                                            |
-| Testing              | 🟡    | 60 unit + integration tests, CI workflow (format, lint, typecheck, test, build, audit)                                                                                                                                       | CI `explain()` check for collection scans, AI contract tests on golden transcripts, load tests                        |
+| Testing              | 🟡    | 93 unit + integration tests, CI workflow (format, lint, typecheck, test, build, audit)                                                                                                                                       | CI `explain()` check for collection scans, AI contract tests on golden transcripts, load tests                        |
 
 ## 5. Data model (MongoDB collections)
 
@@ -183,7 +194,7 @@ Added beyond the PRD:
 | S3 bucket (or R2/MinIO)   | ⬜    | Private bucket + credentials; set `STORAGE_DRIVER=s3` and `S3_*`                                                                                                                                                                                                                      |
 | Google OAuth client       | ⬜    | Create a Web client id; set `GOOGLE_CLIENT_ID` (backend) and `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (frontend)                                                                                                                                                                                |
 | Linux VM + PM2            | ⬜    | `npm ci && npm run build && npm run db:sync-indexes`, then `pm2 start ecosystem.config.cjs --env production`                                                                                                                                                                          |
-| Janus + coturn VM         | ⬜    | Public IP, UDP ports open, AudioBridge/TextRoom plugins, admin API on the private network                                                                                                                                                                                             |
+| Janus + coturn VM         | 🟡    | Dev server running (AWS, Sydney; see [DEVOPS.md](DEVOPS.md)). Production: Mumbai, compute-optimised instance, TLS with the domain                                                                                                                                                     |
 | STT / TTS providers       | ⬜    | PRD open question; needed for MVP-4                                                                                                                                                                                                                                                   |
 | Sentry project            | ⬜    | DSN for error tracking                                                                                                                                                                                                                                                                |
 | Production cookies        | ⬜    | If the frontend and API are on different sites: `COOKIE_SAMESITE=none`, `COOKIE_SECURE=true`, and the Vercel URL in `CORS_ORIGINS`                                                                                                                                                    |
@@ -205,10 +216,11 @@ Added beyond the PRD:
 
 1. **Unblock MVP-1 for real use:** Anthropic key, S3 bucket, Google client id; then measure
    extraction precision on ~50 resumes.
-2. **MVP-2 text interview:** `evaluateAnswer` and `phraseQuestion` in the AI gateway, embeddings
-   and the vector index, seed questions and rubrics, then `POST /interviews/:id/answers`
-   running the turn loop.
-3. **MVP-3:** the `report.generate` job (aggregate turn scores, LLM report, write `skill_history`).
-4. **Parallel MVP-4 spike:** provision Janus + coturn and compare RTP forwarding vs a Node WebRTC
-   peer for the bot.
+2. **Finish MVP-2:** run real interviews with `AI_PROVIDER=anthropic`, tune the interviewer and
+   evaluator prompts, and check the "follow-ups feel realistic ≥ 4/5" exit criterion with internal
+   testers. Then the question bank: embeddings, the vector index, ~100 seed scenarios and rubrics.
+3. **Finish MVP-3:** with the real AI, build 30 golden transcripts, check the re-score delta
+   (≤ 0.5) and report latency (≤ 60 s), and review report quality.
+4. **MVP-4:** the spike is done ([report](spikes/janus-audio-bridge.md)). Next: the browser check
+   on the test page, then `POST /interviews/:id/join` and the bot joining with a WebRTC peer.
 5. **Before beta:** account deletion, Sentry, per-interview cost cap, list endpoints for the frontend.

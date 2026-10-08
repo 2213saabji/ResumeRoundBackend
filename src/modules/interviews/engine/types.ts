@@ -31,3 +31,6 @@ export const MOVES = [
   'wrap_up',
 ] as const;
 export type Move = (typeof MOVES)[number];
+
+/** Moves that produce a question: every controller move, plus the interview's first question. */
+export const QUESTION_MOVES = ['opening', ...MOVES] as const;

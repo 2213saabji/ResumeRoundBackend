@@ -1,0 +1,7 @@
+# TextRoom: data-channel rooms for live captions and turn state next to an AudioBridge room
+# (AudioBridge itself has no data channels).
+
+general: {
+	admin_key = "${TEXTROOM_ADMIN_KEY}"
+	json = "compact"
+}

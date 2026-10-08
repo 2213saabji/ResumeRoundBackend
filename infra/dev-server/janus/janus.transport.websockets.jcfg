@@ -1,0 +1,14 @@
+# Janus WebSocket transport: browsers (janus.js) connect here.
+# Dev: plain ws:// on 8188, open to developer IPs. Production: wss:// behind TLS on 443.
+
+general: {
+	json = "compact"
+	ws = true
+	ws_port = 8188
+	wss = false
+}
+
+admin: {
+	admin_ws = false
+	admin_wss = false
+}

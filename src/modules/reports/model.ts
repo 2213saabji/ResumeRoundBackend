@@ -17,6 +17,7 @@ const reportSchema = new Schema(
         resources: [{ _id: false, title: String, url: String }],
       },
     ],
+    questionsAnswered: { type: Number, default: 0 },
     generatedBy: { provider: String, model: String },
   },
   { timestamps: true, collection: 'reports' },

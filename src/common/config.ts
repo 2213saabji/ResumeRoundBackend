@@ -64,8 +64,13 @@ const envSchema = z.object({
 
   JANUS_HTTP_URL: optionalString,
   JANUS_WS_URL: optionalString,
-  JANUS_API_SECRET: optionalString,
+  JANUS_TOKEN_SECRET: optionalString,
   JANUS_ADMIN_SECRET: optionalString,
+  AUDIOBRIDGE_ADMIN_KEY: optionalString,
+  TEXTROOM_ADMIN_KEY: optionalString,
+  TURN_URLS: csv,
+  TURN_SECRET: optionalString,
+  TURN_REALM: optionalString,
 });
 
 export type Config = z.infer<typeof envSchema>;
@@ -86,6 +91,16 @@ function loadConfig(): Config {
   if (cfg.AI_PROVIDER === 'anthropic' && !cfg.ANTHROPIC_API_KEY) {
     throw new Error(
       'Invalid environment configuration: ANTHROPIC_API_KEY is required when AI_PROVIDER=anthropic',
+    );
+  }
+  if (cfg.JANUS_HTTP_URL && !cfg.JANUS_TOKEN_SECRET) {
+    throw new Error(
+      'Invalid environment configuration: JANUS_TOKEN_SECRET is required when JANUS_HTTP_URL is set',
+    );
+  }
+  if (cfg.TURN_URLS.length > 0 && !cfg.TURN_SECRET) {
+    throw new Error(
+      'Invalid environment configuration: TURN_SECRET is required when TURN_URLS is set',
     );
   }
   if (cfg.COOKIE_SAMESITE === 'none' && !cfg.COOKIE_SECURE) {
