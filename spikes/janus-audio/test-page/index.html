@@ -190,6 +190,9 @@
           <div>Jitter in<b id="jitter">-</b></div>
           <div>Lost in<b id="lost">-</b></div>
           <div>Jitter buffer<b id="jbuf">-</b></div>
+          <div>Lost out<b id="lostOut">-</b></div>
+          <div>Concealed (choppy)<b id="concealed">-</b></div>
+          <div>Late (discarded)<b id="late">-</b></div>
         </div>
       </section>
 
@@ -313,8 +316,10 @@
       let session = null;
 
       async function start() {
-        $('start').disabled = true;
+        setControls(true);
         $('delays').innerHTML = '';
+        for (const id of ['path', 'rtt', 'jitter', 'lost', 'jbuf', 'lostOut', 'concealed', 'late'])
+          $(id).textContent = '-';
         const mode = $('mode').value;
         $('delayHelp').textContent =
           mode === 'echo'
@@ -330,6 +335,7 @@
             iceTransportPolicy: $('relay').checked ? 'relay' : 'all',
           });
           mic.getTracks().forEach((t) => pc.addTrack(t, mic));
+          log('ICE policy', $('relay').checked ? 'relay only (TURN)' : 'all');
 
           const janus = new Janus(cfg.wsUrl, cfg.token);
           await janus.connect();
@@ -485,9 +491,29 @@
           if (s.type === 'inbound-rtp' && s.kind === 'audio') {
             $('jitter').textContent = `${Math.round((s.jitter || 0) * 1000)} ms`;
             $('lost').textContent = `${s.packetsLost || 0} / ${s.packetsReceived || 0}`;
-            if (s.jitterBufferEmittedCount)
+            // Jitter buffer and concealment over the last second, not since the start.
+            const prev = stats.prev || {};
+            const emitted = (s.jitterBufferEmittedCount || 0) - (prev.emitted || 0);
+            if (emitted > 0)
               $('jbuf').textContent =
-                `${Math.round((s.jitterBufferDelay / s.jitterBufferEmittedCount) * 1000)} ms`;
+                `${Math.round((((s.jitterBufferDelay || 0) - (prev.delay || 0)) / emitted) * 1000)} ms`;
+            const total = (s.totalSamplesReceived || 0) - (prev.total || 0);
+            // Silent concealment (nothing sent, e.g. silence) is not audible choppiness.
+            const concealed =
+              (s.concealedSamples || 0) - (s.silentConcealedSamples || 0) - (prev.concealed || 0);
+            if (total > 0)
+              $('concealed').textContent = `${((concealed / total) * 100).toFixed(1)} %`;
+            stats.prev = {
+              emitted: s.jitterBufferEmittedCount || 0,
+              delay: s.jitterBufferDelay || 0,
+              total: s.totalSamplesReceived || 0,
+              concealed: (s.concealedSamples || 0) - (s.silentConcealedSamples || 0),
+            };
+            $('late').textContent = `${s.packetsDiscarded || 0}`;
+          }
+          if (s.type === 'remote-inbound-rtp' && s.kind === 'audio') {
+            $('lostOut').textContent =
+              `${s.packetsLost || 0} (${((s.fractionLost || 0) * 100).toFixed(1)} %)`;
           }
         });
       }
@@ -503,8 +529,16 @@
           session = null;
           $('state').textContent = 'closed';
         }
-        $('start').disabled = false;
-        $('stop').disabled = true;
+        stats.prev = null;
+        setControls(false);
+      }
+
+      /** Mode and TURN only apply when connecting, so lock them during a call. */
+      function setControls(busy) {
+        $('start').disabled = busy;
+        $('mode').disabled = busy;
+        $('relay').disabled = busy;
+        if (!busy) $('stop').disabled = true;
       }
 
       $('start').onclick = start;

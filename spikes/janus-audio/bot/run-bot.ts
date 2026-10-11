@@ -26,7 +26,10 @@ log(label, 'joined', {
 const bot = new TurnBot(link, botOptionsFromEnv(reply));
 bot.onTurn = (m) => log(label, 'turn', { ...m });
 const sample = cpuSampler();
-const usage = setInterval(() => log(label, 'usage', { ...sample(), ...counters }), 10_000);
+const usage = setInterval(
+  () => log(label, 'usage', { ...sample(), ...counters, ...bot.takeArrivalStats() }),
+  10_000,
+);
 
 onExit(async () => {
   clearInterval(usage);

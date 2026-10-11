@@ -9,6 +9,8 @@ export interface TurnBotOptions {
   /** Simulated STT + LLM + TTS time before the reply starts (0 = transport only). */
   thinkMs: number;
   thresholdDb: number;
+  /** Shorter sounds (clicks, breaths) are ignored instead of answered. */
+  minSpeechMs: number;
 }
 
 export interface TurnMetrics {
@@ -19,7 +21,7 @@ export interface TurnMetrics {
   avgEncodeMsPerFrame: number;
 }
 
-export const counters = { packetsIn: 0, packetsOut: 0, decodeErrors: 0, turns: 0 };
+export const counters = { packetsIn: 0, packetsOut: 0, decodeErrors: 0, turns: 0, ignoredBlips: 0 };
 
 /**
  * Transport-independent bot: decodes the room audio (Opus), detects the end of speech with an
@@ -35,6 +37,9 @@ export class TurnBot {
   private speechStart = 0;
   private lastVoiced = 0;
   private readonly timer: NodeJS.Timeout;
+  private lastArrival = 0;
+  /** Spacing between incoming packets since the last takeArrivalStats() call. */
+  private arrivalGaps: number[] = [];
   onTurn: (m: TurnMetrics) => void = () => {};
 
   constructor(
@@ -49,6 +54,9 @@ export class TurnBot {
 
   private onOpus(payload: Buffer): void {
     counters.packetsIn++;
+    const arrival = performance.now();
+    if (this.lastArrival) this.arrivalGaps.push(arrival - this.lastArrival);
+    this.lastArrival = arrival;
     let pcm: Int16Array;
     try {
       pcm = toInt16(this.decoder.decode(payload));
@@ -74,6 +82,10 @@ export class TurnBot {
     if (!this.inSpeech || this.speaking) return;
     if (performance.now() - this.lastVoiced < this.opts.hangoverMs) return;
     this.inSpeech = false;
+    if (this.lastVoiced - this.speechStart < this.opts.minSpeechMs) {
+      counters.ignoredBlips++;
+      return;
+    }
     void this.reply(performance.now());
   }
 
@@ -120,6 +132,20 @@ export class TurnBot {
     counters.packetsOut++;
   }
 
+  /** How evenly the room audio arrived (Janus sends a packet every 20 ms). */
+  takeArrivalStats() {
+    const gaps = this.arrivalGaps;
+    this.arrivalGaps = [];
+    if (gaps.length === 0) return {};
+    const sorted = [...gaps].sort((a, b) => a - b);
+    const at = (p: number) =>
+      Number(sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))]!.toFixed(1));
+    return {
+      arrivalGapMs: { p50: at(0.5), p99: at(0.99), max: at(1) },
+      gapsOver40ms: gaps.filter((g) => g > 40).length,
+    };
+  }
+
   async stop(): Promise<void> {
     clearInterval(this.timer);
     await this.link.close();
@@ -136,5 +162,6 @@ export function botOptionsFromEnv(reply: Int16Array): TurnBotOptions {
     hangoverMs: Number(process.env.HANGOVER_MS ?? 700),
     thinkMs: Number(process.env.THINK_MS ?? 0),
     thresholdDb: Number(process.env.THRESHOLD_DB ?? -45),
+    minSpeechMs: Number(process.env.MIN_SPEECH_MS ?? 300),
   };
 }
