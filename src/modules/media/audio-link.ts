@@ -7,6 +7,7 @@ import {
   RtpPacket,
 } from 'werift';
 import { FRAME_SAMPLES, SPEECH_SAMPLE_RATE, bytesToPcm, pcmToBytes } from '../speech/audio.js';
+import { FramePacer } from './frame-pacer.js';
 import type { JanusHandle, JanusWs } from './janus-ws.js';
 import { AUDIOBRIDGE_PLUGIN } from './janus-client.js';
 import { RtpReorder } from './rtp-reorder.js';
@@ -14,7 +15,6 @@ import { RtpReorder } from './rtp-reorder.js';
 const OPUS_PT = 111;
 /** RTP timestamps for Opus always run at 48 kHz, whatever rate we encode at. */
 const RTP_TICKS_PER_FRAME = 960;
-const FRAME_MS = 20;
 const CONNECT_TIMEOUT_MS = 15_000;
 
 /** The bot's side of a call: room audio in, interviewer speech out (16 kHz mono PCM). */
@@ -37,7 +37,13 @@ export interface AudioLink {
  */
 export async function joinAudioRoom(
   janus: JanusWs,
-  room: { roomId: number; pin: string; display: string },
+  room: {
+    roomId: number;
+    pin: string;
+    display: string;
+    /** Packets Janus buffers from this participant before mixing it; room default if unset. */
+    prebuffer?: number;
+  },
 ): Promise<AudioLink> {
   const handle: JanusHandle = await janus.attach(AUDIOBRIDGE_PLUGIN);
   const decoder = new OpusScript(SPEECH_SAMPLE_RATE, 1, OpusScript.Application.VOIP);
@@ -107,7 +113,14 @@ export async function joinAudioRoom(
       await new Promise((r) => setTimeout(r, 20));
     }
     const joined = await handle.message(
-      { request: 'join', room: room.roomId, pin: room.pin, display: room.display, muted: false },
+      {
+        request: 'join',
+        room: room.roomId,
+        pin: room.pin,
+        display: room.display,
+        muted: false,
+        ...(room.prebuffer ? { prebuffer: room.prebuffer } : {}),
+      },
       { type: 'offer', sdp: pc.localDescription!.sdp },
     );
     if (!joined.jsep) throw new Error('Janus sent no answer to the join offer');
@@ -124,8 +137,7 @@ export async function joinAudioRoom(
 
   let seq = Math.floor(Math.random() * 0xffff);
   let timestamp = Math.floor(Math.random() * 0xffffffff);
-  /** When the next frame is due; keeps playback on a 20 ms grid across play() calls. */
-  let nextFrameAt = 0;
+  const pacer = new FramePacer();
   let playing: Promise<void> = Promise.resolve();
 
   const sendFrame = (frame: Int16Array, marker: boolean) => {
@@ -141,17 +153,13 @@ export async function joinAudioRoom(
   };
 
   const playNow = async (pcm: Int16Array) => {
-    const now = performance.now();
-    // After a pause (or the first time), restart the clock; the RTP marker flags a new talkspurt.
-    const resumed = nextFrameAt < now;
-    if (resumed) nextFrameAt = now;
+    // After a pause (or the first time) the RTP marker flags a new talkspurt.
+    const resumed = pacer.start();
     for (let offset = 0; offset < pcm.length && !closed; offset += FRAME_SAMPLES) {
       const frame = new Int16Array(FRAME_SAMPLES);
       frame.set(pcm.subarray(offset, offset + FRAME_SAMPLES));
       sendFrame(frame, resumed && offset === 0);
-      nextFrameAt += FRAME_MS;
-      const wait = nextFrameAt - performance.now();
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      await pacer.frameSent();
     }
   };
 

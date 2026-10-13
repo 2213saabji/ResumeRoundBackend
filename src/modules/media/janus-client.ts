@@ -124,6 +124,8 @@ export class JanusClient {
     pin: string;
     description: string;
     samplingRate?: number;
+    /** Default jitter buffer for participants who don't set their own (20 ms packets). */
+    prebuffer?: number;
   }) {
     await this.audioBridge(
       {
@@ -136,9 +138,10 @@ export class JanusClient {
         is_private: true,
         audiolevel_event: true,
         sampling_rate: opts.samplingRate ?? 16000,
-        // 2 packets (40 ms) of jitter buffer per participant instead of 6: the spike measured
-        // a p95 of about 100 ms added delay instead of 290 ms, with no lost turns.
-        default_prebuffering: 2,
+        // Jitter buffer per participant, in 20 ms packets. The spike chose 2 (bot and fake
+        // candidates on the server itself); over home Wi-Fi 2 loses speech, so callers pass a
+        // bigger value for candidates and the bot overrides it on join.
+        default_prebuffering: opts.prebuffer ?? 2,
       },
       'created',
       [AUDIOBRIDGE_ROOM_EXISTS],

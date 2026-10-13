@@ -136,6 +136,7 @@ try {
       tts: getTextToSpeech(),
       log: logger.child({ e2e: 'bot' }),
       pollMs: 500,
+      prebuffer: config.BOT_JANUS_PREBUFFER,
     },
     id,
   );

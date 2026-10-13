@@ -31,6 +31,8 @@ export interface CallDeps {
   collector?: Partial<AnswerCollectorOptions>;
   /** How often the call re-reads the interview (typed answers, End button, time). */
   pollMs: number;
+  /** Janus jitter buffer for the bot's voice, in 20 ms packets (room default if unset). */
+  prebuffer?: number;
 }
 
 /** Longest answer the interview loop accepts (same limit as typed answers). */
@@ -149,7 +151,11 @@ export class InterviewCall {
 
     try {
       this.captions = await this.deps.janus.attach(TEXTROOM_PLUGIN);
-      this.audio = await joinAudioRoom(this.deps.janus, { ...this.room, display: 'interviewer' });
+      this.audio = await joinAudioRoom(this.deps.janus, {
+        ...this.room,
+        display: 'interviewer',
+        prebuffer: this.deps.prebuffer,
+      });
       this.audio.onDisconnect(() => {
         log.warn('call audio disconnected');
         void this.stop();

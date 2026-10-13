@@ -55,6 +55,7 @@ function startCall(interviewId: string): void {
       tts: getTextToSpeech(),
       log: log.child({ interviewId }),
       pollMs: config.BOT_POLL_MS,
+      prebuffer: config.BOT_JANUS_PREBUFFER,
       collector: {
         graceMs: config.BOT_TURN_END_MS,
         shortAnswerWaitMs: config.BOT_SHORT_ANSWER_WAIT_MS,
