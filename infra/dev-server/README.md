@@ -15,6 +15,9 @@ in this repo.**
 
 ## Apply or update
 
+On a new server, attach the Elastic IP **before** the first run: the script writes the public IP
+into the configs. Full rebuild steps: [docs/DEVOPS.md, section 11](../../docs/DEVOPS.md).
+
 From the repo root on your laptop:
 
 ```bash
