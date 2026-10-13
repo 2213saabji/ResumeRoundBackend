@@ -117,7 +117,7 @@ async function ensureRoom(
     description: `interview ${id}`,
   };
   try {
-    await s.janus.createAudioRoom(spec);
+    await s.janus.createAudioRoom({ ...spec, prebuffer: config.JANUS_ROOM_PREBUFFER });
     await s.janus.createTextRoom(spec);
   } catch (err) {
     logger.error({ err, interviewId: id }, 'could not create the call rooms');

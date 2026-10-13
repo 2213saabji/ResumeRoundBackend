@@ -96,6 +96,17 @@ const envSchema = z.object({
   JANUS_WS_URL: optionalString,
   JANUS_TOKEN_SECRET: optionalString,
   JANUS_ADMIN_SECRET: optionalString,
+  /**
+   * Packets (20 ms each) Janus buffers from each candidate before mixing. Home Wi-Fi delivers
+   * packets unevenly and Janus drops audio that overflows or underruns this buffer: 2 lost
+   * ~10-20% of speech from a home connection, 10 (200 ms) none. Applies to new rooms.
+   */
+  JANUS_ROOM_PREBUFFER: z.coerce.number().int().min(1).max(50).default(10),
+  /**
+   * The bot's own buffer. 2 when the bot runs next to Janus (production); ~10 when it runs on a
+   * laptop over Wi-Fi (development).
+   */
+  BOT_JANUS_PREBUFFER: z.coerce.number().int().min(1).max(50).default(2),
   AUDIOBRIDGE_ADMIN_KEY: optionalString,
   TEXTROOM_ADMIN_KEY: optionalString,
   TURN_URLS: csv,
