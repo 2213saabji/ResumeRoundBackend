@@ -4,7 +4,9 @@ This is everything the backend exposes today, written for the Next.js frontend. 
 **MVP-1 "Resume intelligence"** flow end to end (sign up, onboarding, resume upload, review and
 correct the detected profile), plus the interview endpoints that already work.
 
-Live-call features (Janus/WebRTC) are **not** available yet; see [What is not ready yet](#9-what-is-not-ready-yet).
+The live voice interview (Janus/WebRTC) works in development: see
+[7.6 Live voice interview](#76-live-voice-interview-mvp-4). Barge-in and push-to-talk come later;
+see [What is not ready yet](#9-what-is-not-ready-yet).
 
 ---
 
@@ -444,15 +446,15 @@ current one, including any manual corrections. Warn the user before re-uploading
 5. **Review profile:** `GET /profiles/current`; editable chips per skill bucket, project cards;
    `PATCH /profiles/current` on save.
 6. **Ready to interview:** `POST /interviews` (section 7) shows the generated plan.
-7. **Interview (text):** `start` → `answers` loop (section 7.4). The live voice
-   room comes in a later phase.
+7. **Interview:** text: `start` → `answers` loop (section 7.4); voice: `start` → `join` and the
+   live call room (section 7.6).
 
 ---
 
 ## 7. Interviews
 
 Create an interview and see its plan (7.1-7.3), run it by typing answers (7.4), then read the
-report (7.5). The live voice call is a later phase.
+report (7.5). Voice interviews use the live call in 7.6.
 
 ### 7.1 Create
 
@@ -527,6 +529,10 @@ GET  /interviews/:id/turns?limit=20&cursor=<nextCursor>
               evaluation, decision, askedAt, answeredAt }
      (evaluation and decision are null until the interview has ended; this is the transcript /
       history view only: never poll it to wait for a question, see 7.4)
+     decision = { move, reason } | null   // why the interviewer asked the next question
+       move: deepen | challenge_vague | clarify | raise_difficulty | hint |
+             reveal_scenario_info | next_objective | wrap_up
+       reason: one sentence, e.g. "Answer was strong; raising difficulty within the level band"
 
 POST /interviews/:id/end                  -> 200 { "interview": { ..., "status": "ended" } }
      (safe to call more than once)
@@ -671,8 +677,8 @@ while a request is in flight.
 - `GET /interviews/:id/turns`: each turn adds `objectiveKind` and `isFollowUp`. While the interview
   is in progress, `evaluation` and `decision` are always `null` (no scores mid-interview); they are
   filled in after it ends.
-- Create interviews with `"mode": "text"` for now. `voice` interviews will also accept typed
-  answers until the live call (MVP-4) ships.
+- Create interviews with `"mode": "text"` for a typed interview, or `"mode": "voice"` for the
+  live call (7.6). `voice` interviews also accept typed answers.
 
 #### Interview screen flow
 
@@ -785,6 +791,230 @@ The report object:
   `GET /interviews/:id/turns`: after the interview ends, each turn includes `evaluation` and
   `decision`.
 
+### 7.6 Live voice interview (MVP-4)
+
+> **Status: live in development.** `POST /interviews/:id/join` works and the interview bot joins
+> the call, speaks the questions, transcribes the answers and sends captions. The backend needs
+> the bot process running (`npm run dev:bot`) and the dev media server switched on. Not built
+> yet: barge-in (interrupting the interviewer) and push-to-talk.
+
+#### What the frontend does, and what it never does
+
+The candidate talks to an AI interviewer over a WebRTC audio call. The browser only sends the
+microphone to the call and plays what comes back. Everything else happens on the backend:
+
+```
+Browser (mic) ──WebRTC──> Janus room <──WebRTC── Interview bot (backend)
+Browser (speaker) <──────  room audio             ├─ speech-to-text (Deepgram)
+Browser (captions) <─ data channel ───────────────├─ AI interviewer (Ollama LLM)
+                                                  └─ text-to-speech (Deepgram)
+```
+
+- **Do:** get microphone permission, join the room, play the room audio, show captions and the
+  interviewer's state, and offer mute, end and typed-answer controls.
+- **Never:** call Deepgram, the LLM or any speech API, hold API keys, record or process audio
+  yourself. There are no speech settings on the frontend: voice, language and timing are all
+  backend config.
+
+#### Join the call
+
+```
+POST /interviews/:id/join
+-> 200 {
+  "wsUrl": "wss://media.resumeround.<domain>/janus",  // dev: "ws://<server-ip>:8188"
+  "token": "...",            // Janus token; valid for the interview's maximum length + 15 min
+  "room": 4821733,           // AudioBridge room for this interview only
+  "pin": "550913",           // room PIN
+  "captionRoom": 4821733,    // TextRoom for captions and state events (same PIN)
+  "iceServers": [
+    { "urls": "stun:<server-ip>:3478" },
+    {
+      "urls": ["turn:<server-ip>:3478?transport=udp", "turn:<server-ip>:3478?transport=tcp"],
+      "username": "1760300000:6710...",   // time-limited TURN credentials
+      "credential": "..."
+    }
+  ]
+}
+```
+
+| Case                                                    | Response                                                                    |
+| ------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Interview created with `mode: "text"`                   | `409 CONFLICT` "This interview is in text mode"                             |
+| Interview not started yet                               | `409 CONFLICT` "Start the interview first" → call `start` (7.4), then retry |
+| Interview already ended                                 | `409 CONFLICT` "This interview has ended" → go to the report page           |
+| Not the owner of the interview                          | `404 NOT_FOUND`                                                             |
+| Voice not configured, no bot free, or media server down | `503 SERVICE_UNAVAILABLE` → offer to continue in text mode (7.4)            |
+
+- Order: create with `mode: "voice"`, `POST /interviews/:id/start`, then `join`, all from the
+  candidate's Start click (see "Browser rules" below).
+- The bot joins the room within about a second of `join` and starts speaking the current question
+  straight away, so connect immediately after `join` returns. The first question is also shown as
+  a caption and in the `start` response, so nothing is lost if the audio starts a moment early.
+- The token and TURN credentials last for the whole interview. Calling `join` again (after a
+  reconnect, see below) returns a fresh set for the same room; it does not restart the interview.
+- Treat every field as opaque and secret for that session: do not log or store them.
+
+#### Connect to the room
+
+Janus is reached over its WebSocket API. You can use the official `janus.js` library, or a small
+client like the reference page used to test this server:
+[spikes/janus-audio/test-page/index.html](../spikes/janus-audio/test-page/index.html) (about 80
+lines: create a session, attach, send messages, trickle ICE, keepalive). The steps:
+
+1. **Microphone** (exact settings matter, see below):
+   ```js
+   const mic = await navigator.mediaDevices.getUserMedia({
+     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+   });
+   ```
+2. **Peer connection** with the `iceServers` from `join`; add the mic track.
+   ```js
+   const pc = new RTCPeerConnection({ iceServers: join.iceServers });
+   mic.getTracks().forEach((t) => pc.addTrack(t, mic));
+   ```
+3. **Janus session:** open `new WebSocket(join.wsUrl, 'janus-protocol')`, send
+   `{ janus: 'create' }`, then send `{ janus: 'keepalive', session_id }` **every 25 s**. Put
+   `token: join.token` on **every** message (Janus checks it on each request).
+4. **Attach** `janus.plugin.audiobridge`, then trickle ICE: send every `pc.onicecandidate`
+   candidate with `{ janus: 'trickle', candidate }`, and `{ completed: true }` at the end. Add
+   candidates that Janus sends (`janus: 'trickle'` events) with `pc.addIceCandidate`.
+5. **Join** with an offer:
+   ```js
+   const offer = await pc.createOffer();
+   await pc.setLocalDescription(offer);
+   const res = await handle.message(
+     { request: 'join', room: join.room, pin: join.pin, display: 'candidate', muted: false },
+     { type: offer.type, sdp: offer.sdp },
+   );
+   await pc.setRemoteDescription(res.jsep); // Janus answers with the room mix
+   ```
+6. **Play the room audio:**
+   ```js
+   pc.ontrack = (e) => {
+     audioEl.srcObject = e.streams[0] ?? new MediaStream([e.track]);
+     audioEl.play();
+   };
+   ```
+   The candidate hears only the interviewer (Janus never sends you your own voice back).
+7. **Captions channel:** attach `janus.plugin.textroom` on the same session, send
+   `{ request: 'setup' }`, answer the offer Janus returns (a second `RTCPeerConnection` with a
+   data channel), then on the data channel send
+   `{ textroom: 'join', room: join.captionRoom, pin: join.pin, username, transaction }` with a
+   **new random username on every join**, e.g. `candidate-${crypto.randomUUID().slice(0, 8)}`.
+   TextRoom usernames must be unique in a room, and after a network drop the old session can
+   stay in the room for up to a minute; a fixed name would be rejected (TextRoom error `420`,
+   username taken). The backend never relies on this name.
+   The bot does not join the TextRoom as a user: it sends every event as a room
+   **announcement**, which arrives on the data channel as
+   `{ textroom: 'announcement', room, date, text: '<JSON>' }`. Handle only messages with
+   `textroom === 'announcement'`, parse `text` (events below), and ignore anything else.
+
+`pc.connectionState === 'connected'` means audio is flowing. Expect about 1-2 s from `join` to
+connected; show a "Connecting..." state until then.
+
+#### Captions and interviewer state
+
+Each announcement's `text` is one JSON event:
+
+```jsonc
+{ "type": "state", "state": "speaking" }      // "speaking" | "listening" | "thinking"
+{ "type": "interviewer", "seq": 3, "text": "Why did you pick Kafka over RabbitMQ?" }
+{ "type": "candidate", "seq": 3, "text": "we needed replay", "final": false }
+{ "type": "candidate", "seq": 3, "text": "We needed replay and ordering per key.", "final": true }
+{ "type": "ended", "reason": "completed" }    // "completed" | "time_up" | "ended_by_user"
+```
+
+- **`state`** drives the main indicator:
+  - `speaking`: the interviewer is talking. Show its caption; the candidate should wait.
+  - `listening`: it's the candidate's turn. Show a "Listening..." indicator and a mic level meter.
+  - `thinking`: the candidate has finished and the reply is being prepared (2-4 s in
+    development). The interviewer says a short "Okay." / "Got it." first, and "Give me a
+    moment." if it takes longer. Show a subtle "thinking" animation.
+  - Until the first `state` event arrives, show "Connecting...".
+- **`interviewer`** arrives one sentence at a time, when that sentence starts playing, so captions
+  stay in step with the voice. Append sentences with the same `seq` into one bubble.
+- **`candidate`**: live transcript of what the candidate is saying. Replace the current line
+  while `final` is `false` (each update carries the whole answer so far); exactly one
+  `final: true` event arrives when the answer is submitted, with the cleaned-up text that was
+  stored. Grey italic for interim text works well.
+- **`ended`**: hang up (below), then go to the report page as in text mode. The bot also closes
+  the room a moment later.
+- Announcements are not stored by Janus: after a reconnect, rebuild the history from
+  `GET /interviews/:id/turns`.
+
+`seq` matches `currentTurn.seq` and the `seq` of `GET /interviews/:id/turns`, so the on-screen
+history and the stored transcript line up.
+
+#### How turn-taking works (what to tell the candidate)
+
+- A pause of about **1-1.5 s** is treated as "finished answering" (a bit longer after a very
+  short answer). The interviewer then acknowledges and asks the next question after about
+  2-4 s in development.
+- The whole interview is in **English**.
+- **Until barge-in ships**, the candidate cannot interrupt: speech while the interviewer is
+  talking is ignored. Show "Interviewer is speaking..." during `speaking`, so candidates wait.
+- Long thinking pauses can end an answer early. Until push-to-talk ships, show a short tip
+  before starting: _"Take your time. If you need to think, say 'let me think' first."_
+- **Planned controls** (later in MVP-4/5, keep room for them in the layout): a "Hold to talk"
+  button (push-to-talk), and interrupting the interviewer by speaking (barge-in).
+
+#### Controls
+
+| Control                  | How                                                                                                                                          |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mute / unmute            | `handle.message({ request: 'configure', muted: true \| false })`. Also flip `track.enabled` on the mic track so the browser shows it muted   |
+| Type an answer instead   | `POST /interviews/:id/answers` as in 7.4, also during a voice call (e.g. code or a long name). The interviewer then speaks the next question |
+| End interview            | `POST /interviews/:id/end`, then hang up                                                                                                     |
+| Hang up (leave the room) | `handle.message({ request: 'leave' })`, send `{ janus: 'destroy' }`, close the WebSocket, `pc.close()`, stop the mic tracks                  |
+
+Always hang up on: the `ended` event, leaving the interview page, and logout. Add a
+`beforeunload` warning while the call is connected.
+
+#### Reconnecting
+
+Networks drop. The interview survives a short disconnect:
+
+- If `pc.connectionState` becomes `failed`, or the Janus WebSocket closes, hang up, call
+  `POST /interviews/:id/join` again and reconnect. Show "Reconnecting..." meanwhile.
+- `disconnected` often recovers by itself: wait about 5 s before treating it as `failed`.
+- After 3 failed attempts, offer text mode (7.4); the interview continues from the same question.
+- On page reload, follow the reload rules in 7.4 (`GET /interviews/:id` first). If
+  `status === "in_progress"` and `mode === "voice"`, offer a "Rejoin call" button. Do not
+  rejoin automatically: the browser needs a click before it can play audio.
+
+#### Browser rules and setup screen
+
+- **HTTPS is required** for the microphone (`http://localhost` is fine in development).
+- **Autoplay:** browsers block audio until the user clicks. Call `join`, create the
+  `AudioContext` and call `audioEl.play()` from the Start / Rejoin button's click handler.
+- **Echo cancellation must stay on** (the `getUserMedia` settings above). Without it the
+  interviewer's own voice is picked up by the mic and transcribed as the candidate's answer.
+- **Recommend headphones** on the setup screen, for the same reason.
+- **Setup screen before the call:** ask for microphone permission, offer a microphone picker
+  (`enumerateDevices`) when there is more than one, and show a live level meter (an
+  `AnalyserNode` on the mic stream, as in the reference page) so the candidate can check they are
+  heard.
+- **Supported:** current Chrome, Edge, Firefox and Safari (desktop and mobile). On iOS Safari,
+  every audio start needs a tap.
+
+| Error                               | Message to show                                                                     |
+| ----------------------------------- | ----------------------------------------------------------------------------------- |
+| `getUserMedia` → `NotAllowedError`  | "Allow microphone access in your browser settings to use voice mode."               |
+| `getUserMedia` → `NotFoundError`    | "No microphone found. Connect one, or continue in text mode."                       |
+| `getUserMedia` → `NotReadableError` | "Your microphone is in use by another app (Zoom, Teams...). Close it and retry."    |
+| ICE never connects (after retries)  | "Your network is blocking the call. Try another network, or continue in text mode." |
+| `join` → `503`                      | "Voice is busy right now. Continue in text mode?"                                   |
+
+#### Development notes
+
+- The dev media server (AWS) is switched on only during testing. If the Janus WebSocket times
+  out, check with the backend team that it is running. Production will limit access again.
+- The backend needs three processes for a voice call: `npm run dev` (API + worker) and
+  `npm run dev:bot` (interview bot).
+- In development the URLs are `ws://` (no TLS); production uses `wss://` on port 443.
+- To try the call before the frontend is ready, run the reference page:
+  `npx tsx spikes/janus-audio/test-page/server.ts`, then open http://localhost:8787.
+
 ---
 
 ## 8. Progress
@@ -816,13 +1046,12 @@ GET /users/me/progress
 
 ## 9. What is not ready yet
 
-| Feature                                                      | Endpoint                    | Today                                        | Planned     |
-| ------------------------------------------------------------ | --------------------------- | -------------------------------------------- | ----------- |
-| Live voice interview (Janus/WebRTC room, captions, barge-in) | `POST /interviews/:id/join` | `501 NOT_IMPLEMENTED`                        | MVP-4       |
-| Google sign-in                                               | `POST /auth/google`         | `503` until `GOOGLE_CLIENT_ID` is configured | Config only |
-| List my resumes / interviews                                 | (none)                      | Not available                                | On request  |
-| Account deletion                                             | (none)                      | Not available                                | Later       |
+| Feature                                  | Endpoint            | Today                                        | Planned     |
+| ---------------------------------------- | ------------------- | -------------------------------------------- | ----------- |
+| Barge-in and push-to-talk in voice calls | (none)              | Not available (voice call itself works)      | MVP-4/5     |
+| Google sign-in                           | `POST /auth/google` | `503` until `GOOGLE_CLIENT_ID` is configured | Config only |
+| List my resumes / interviews             | (none)              | Not available                                | On request  |
+| Account deletion                         | (none)              | Not available                                | Later       |
 
-For the future interview room, plan on `janus.js` in the browser connecting to Janus directly;
-`POST /interviews/:id/join` will return the Janus URL, room id, a short-lived join token and ICE
-servers. The exact contract will be shared when MVP-4 starts.
+The voice interview room (join call, Janus connection, captions, controls, reconnects) is in
+[7.6 Live voice interview](#76-live-voice-interview-mvp-4).

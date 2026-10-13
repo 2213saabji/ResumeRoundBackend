@@ -44,6 +44,7 @@ const aiUsageSchema = new Schema(
     cacheReadTokens: { type: Number, default: 0 },
     cacheWriteTokens: { type: Number, default: 0 },
     audioSeconds: { type: Number, default: 0 },
+    characters: { type: Number, default: 0 },
     costUsd: { type: Number, required: true },
     latencyMs: { type: Number },
     at: { type: Date, default: () => new Date() },
@@ -62,12 +63,62 @@ export interface UsageRecord extends TokenUsage {
   userId?: string | Types.ObjectId;
   interviewId?: string | Types.ObjectId;
   latencyMs?: number;
+  /** Set for self-hosted models (0); otherwise computed from PRICES. */
+  costUsd?: number;
 }
 
 /** Fire-and-forget: metering must never fail the user-facing call. */
 export function recordUsage(record: UsageRecord): void {
-  const costUsd = computeCostUsd(record.model, record);
+  const costUsd = record.costUsd ?? computeCostUsd(record.model, record);
   AiUsageModel.create({ ...record, costUsd }).catch((err: unknown) =>
     logger.error({ err, task: record.task }, 'failed to record AI usage'),
+  );
+}
+
+/**
+ * Speech pricing, keyed `provider:model`: USD per minute of audio sent (STT) or per million
+ * characters (TTS). Pay-as-you-go list prices, Oct 2026; update when provider pricing changes.
+ */
+const SPEECH_PRICES: Record<string, { perMinute?: number; perMillionChars?: number }> = {
+  'deepgram:nova-3': { perMinute: 0.0077 },
+  'deepgram:aura-2': { perMillionChars: 30 },
+  'deepgram:aura': { perMillionChars: 15 },
+  'google:chirp3-hd': { perMillionChars: 30 },
+  'google:neural2': { perMillionChars: 16 },
+  'google:wavenet': { perMillionChars: 4 },
+  'google:standard': { perMillionChars: 4 },
+};
+
+export function computeSpeechCostUsd(
+  key: string,
+  usage: { audioSeconds?: number; characters?: number },
+): number {
+  const price = SPEECH_PRICES[key];
+  if (!price) {
+    logger.warn({ key }, 'no price configured for speech model; cost recorded as 0');
+    return 0;
+  }
+  const cost =
+    ((usage.audioSeconds ?? 0) / 60) * (price.perMinute ?? 0) +
+    ((usage.characters ?? 0) / 1_000_000) * (price.perMillionChars ?? 0);
+  return Math.round(cost * 1e6) / 1e6;
+}
+
+export interface SpeechUsageRecord {
+  task: 'stt' | 'tts';
+  provider: string;
+  model: string;
+  userId?: string | Types.ObjectId;
+  interviewId?: string | Types.ObjectId;
+  audioSeconds?: number;
+  characters?: number;
+  latencyMs?: number;
+}
+
+/** Fire-and-forget, like recordUsage. */
+export function recordSpeechUsage(record: SpeechUsageRecord): void {
+  const costUsd = computeSpeechCostUsd(`${record.provider}:${record.model}`, record);
+  AiUsageModel.create({ ...record, costUsd }).catch((err: unknown) =>
+    logger.error({ err, task: record.task }, 'failed to record speech usage'),
   );
 }

@@ -113,12 +113,6 @@ describe('interviews', () => {
     );
   });
 
-  it('returns 501 for endpoints scheduled for later milestones', async () => {
-    expect(
-      (await request(app).post(`/api/v1/interviews/${interviewId}/join`).set(user.auth)).status,
-    ).toBe(501);
-  });
-
   it('enforces the monthly free quota (3 in tests)', async () => {
     const statuses = [];
     for (let i = 0; i < 3; i++) {

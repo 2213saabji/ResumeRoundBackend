@@ -105,32 +105,34 @@ load-tested.
 
 ### 4.6 Key pair: `resumeround-dev` (RSA, `.pem`)
 
-- Stored on the developer laptop, e.g. `C:\Users\Hp\.ssh\resumeround-dev.pem`. It can be downloaded
-  **once**; if lost, a new key must be added to the instance.
+- Stored on the developer laptop at `D:\ResumeRound\AWS\resumeround-dev-key-pair.pem` (outside
+  any git repo). It can be downloaded **once**; if lost, a new key must be added to the instance.
 - **Never** commit it, paste its contents in chat, or share it. Share access by adding each
   person's own public key to the server instead.
 - SSH accepts only this key (no passwords).
 
 ### 4.7 Firewall (security group `resumeround-janus-dev`)
 
-| Port        | Protocol  | Source              | Purpose            | Why this source                                                |
-| ----------- | --------- | ------------------- | ------------------ | -------------------------------------------------------------- |
-| 22          | TCP       | Developer IPs       | SSH                | Server login: never open to the internet                       |
-| 8088        | TCP       | Developer IPs       | Janus HTTP API     | Can create and destroy rooms; only the backend should reach it |
-| 8188        | TCP       | Developer IPs (dev) | Janus WebSocket    | Browsers connect here; public in production, behind TLS        |
-| 10000-10200 | UDP       | Anywhere            | Audio (RTP)        | Candidates connect from anywhere; closed = no sound            |
-| 3478        | UDP + TCP | Anywhere            | STUN/TURN (coturn) | Lets users behind routers and corporate firewalls connect      |
+Since 13 Oct 2026 every rule is open to Anywhere (`0.0.0.0/0`) on the **dev** server, so the
+team and the frontend can connect from any network without editing rules when an IP changes.
 
-**"My IP" vs an IP range for the developer ports.** The home connection's IP changes often (seen:
-`157.49.113.81`, then `157.49.123.20`). Options:
+| Port        | Protocol  | Source   | Purpose            | What still protects it                                        |
+| ----------- | --------- | -------- | ------------------ | ------------------------------------------------------------- |
+| 22          | TCP       | Anywhere | SSH                | Key-only login (`.pem`); no passwords                         |
+| 8088        | TCP       | Anywhere | Janus HTTP API     | Signed token on every request; admin key to create rooms      |
+| 8188        | TCP       | Anywhere | Janus WebSocket    | Signed token on every request                                 |
+| 10000-10200 | UDP       | Anywhere | Audio (RTP)        | Only flows inside a joined, PIN-protected room                |
+| 3478        | UDP + TCP | Anywhere | STUN/TURN (coturn) | Time-limited credentials; relaying to private networks denied |
 
-1. **"My IP"**: most secure; update the three rules whenever the IP changes (EC2 → Security
-   Groups → Edit inbound rules → Source: My IP).
-2. **Provider range `157.49.0.0/16`** (recommended for this dev server): covers the changing IPs;
-   still closed to the rest of the internet, but shared with other customers of the same
-   provider. Acceptable because SSH needs the key and Janus needs its API secret and admin key.
+Accepted for dev because the server holds no candidate data and is stopped when not in use.
+Conditions:
 
-Never set 22 or 8088 to Anywhere.
+- Password login stays off (`sudo sshd -T | grep -i passwordauthentication` → `no`) and
+  automatic security updates stay on (`systemctl is-enabled unattended-upgrades` → `enabled`).
+- One rule per port; never an "All traffic" rule, which would also expose anything started on the
+  server later.
+- **Production:** 22 and 8088 must not be public. SSH from known IPs only (or AWS Session
+  Manager), and 8088 reachable only from the backend and bot servers' security group.
 
 ### 4.8 Server software and security settings
 
@@ -157,18 +159,18 @@ Verified from a developer laptop: HTTP 8088 and WebSocket 8188 reachable, STUN o
 
 ## 5. Credentials inventory
 
-| Credential                   | Needed for                            | Status                                        | Where it lives                                                         |
-| ---------------------------- | ------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------- |
-| AWS account (console login)  | Creating and managing servers         | ✅ In use                                     | Owner only; enable MFA                                                 |
-| EC2 key pair `.pem`          | SSH to the dev server                 | ✅ Created during setup                       | Laptop `~/.ssh`, never in the repo                                     |
-| MongoDB Atlas user           | Database                              | ✅ In use                                     | `.env` (git-ignored). **Rotate the password**: it was shared in a chat |
-| Janus API secret / admin key | Backend ↔ Janus                       | Set during installation                       | Server config + backend `.env`                                         |
-| Anthropic API key            | Real AI interviewer and reports       | ⬜ Not yet                                    | `.env`                                                                 |
-| Speech-to-text provider key  | MVP-4 voice                           | ⬜ Provider not chosen (or self-host Whisper) | `.env`                                                                 |
-| Text-to-speech provider key  | MVP-4 voice                           | ⬜ Provider not chosen (or self-host Piper)   | `.env`                                                                 |
-| Domain + TLS certificate     | `wss://` for Janus, HTTPS for the API | Domain ✅ owned; TLS ⬜ (Let's Encrypt, free) | Domain registrar / DNS; certificate on the server                      |
-| S3 bucket credentials        | Resume and audio storage              | ⬜ Not yet                                    | `.env`, or an EC2 instance role in production                          |
-| Google OAuth client ID       | Google sign-in                        | ⬜ Not yet                                    | `.env` (backend and frontend)                                          |
+| Credential                    | Needed for                            | Status                                                     | Where it lives                                                         |
+| ----------------------------- | ------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------- |
+| AWS account (console login)   | Creating and managing servers         | ✅ In use                                                  | Owner only; enable MFA                                                 |
+| EC2 key pair `.pem`           | SSH to the dev server                 | ✅ Created during setup                                    | Laptop `~/.ssh`, never in the repo                                     |
+| MongoDB Atlas user            | Database                              | ✅ In use                                                  | `.env` (git-ignored). **Rotate the password**: it was shared in a chat |
+| Janus API secret / admin key  | Backend ↔ Janus                       | Set during installation                                    | Server config + backend `.env`                                         |
+| Anthropic API key             | Real AI interviewer and reports       | ⬜ Not yet                                                 | `.env`                                                                 |
+| Deepgram API key              | MVP-4 voice (STT and TTS)             | ✅ Created (role Default); **rotate**: shared in a chat    | `.env` (`DEEPGRAM_API_KEY`)                                            |
+| Google TTS API key (optional) | Only if TTS_PROVIDER=google           | ⬜ Not created (Google Cloud India asks ₹1,000 prepayment) | `.env` (`GOOGLE_TTS_API_KEY`)                                          |
+| Domain + TLS certificate      | `wss://` for Janus, HTTPS for the API | Domain ✅ owned; TLS ⬜ (Let's Encrypt, free)              | Domain registrar / DNS; certificate on the server                      |
+| S3 bucket credentials         | Resume and audio storage              | ⬜ Not yet                                                 | `.env`, or an EC2 instance role in production                          |
+| Google OAuth client ID        | Google sign-in                        | ⬜ Not yet                                                 | `.env` (backend and frontend)                                          |
 
 ---
 
@@ -220,7 +222,7 @@ text-to-speech once volume justifies it.
 
 | Task                              | How                                                                                               |
 | --------------------------------- | ------------------------------------------------------------------------------------------------- |
-| SSH into the server               | `ssh -i C:\Users\Hp\.ssh\resumeround-dev.pem ubuntu@<ELASTIC_IP>`                                 |
+| SSH into the server               | `ssh -i D:\ResumeRound\AWS\resumeround-dev-key-pair.pem ubuntu@16.178.17.240`                     |
 | SSH or Janus suddenly unreachable | Your IP probably changed: update the developer rules in the security group                        |
 | Stop / start to save money        | EC2 → Instances → select → Instance state → Stop / Start (the Elastic IP stays)                   |
 | See what you are paying           | Billing → Cost Explorer, filter by service                                                        |
@@ -245,9 +247,12 @@ text-to-speech once volume justifies it.
 
 ## 10. Open items
 
-- [x] Developer-port source: `157.49.0.0/16` (the home IP changed 4 times in two days).
+- [x] Developer ports: opened to Anywhere for the dev phase (13 Oct 2026); close 22 and 8088
+      before production (section 4.7).
 - [ ] Create the budget alert.
 - [ ] After the spike: decide x86 vs Arm (`t4g`) and EC2 vs Lightsail for dev.
 - [ ] DNS: point a subdomain (e.g. `janus-dev.<domain>`) at `16.178.17.240`.
 - [ ] Rotate the MongoDB Atlas password.
-- [ ] Choose speech-to-text and text-to-speech providers (or self-hosting).
+- [x] Speech providers: Deepgram Nova-3 (STT) and Aura-2 (TTS) for launch; self-host on a GPU
+      server once STT + TTS spend passes about $500/month.
+- [ ] Rotate the Deepgram key (it was pasted in a chat).

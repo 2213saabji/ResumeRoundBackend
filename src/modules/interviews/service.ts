@@ -3,6 +3,7 @@ import { withTransaction } from '../../common/db.js';
 import { Errors } from '../../common/errors.js';
 import type { Page } from '../../common/pagination.js';
 import { jobQueue } from '../jobs/queue.js';
+import { joinCall } from '../media/calls.js';
 import { profilesRepository } from '../profiles/repository.js';
 import { progressService } from '../progress/service.js';
 import { reportsService } from '../reports/service.js';
@@ -183,6 +184,11 @@ export const interviewsService = {
     });
     // `null` means a concurrent request ended it first; return the current state.
     return toPublicInterview(ended ?? (await getOwned(userId, id)));
+  },
+
+  /** Live voice call: rooms, a bot and browser credentials (safe to call again to reconnect). */
+  async join(userId: string, id: string) {
+    return joinCall(await getOwned(userId, id));
   },
 
   async getReport(userId: string, id: string) {

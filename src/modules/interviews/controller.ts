@@ -1,5 +1,4 @@
 import type { Request, Response } from 'express';
-import { Errors } from '../../common/errors.js';
 import type { CursorQuery } from '../../common/pagination.js';
 import type { IdParams } from '../../common/validation.js';
 import { requireUser } from '../auth/middleware.js';
@@ -51,8 +50,8 @@ export const interviewsController = {
     res.json(state);
   },
 
-  /** MVP-4: create/get Janus room, assign a bot, return Janus URL + join token + ICE servers. */
-  async join() {
-    throw Errors.notImplemented('Joining a live interview call');
+  async join(req: Request, res: Response) {
+    const { id } = req.params as IdParams;
+    res.json(await interviewsService.join(requireUser(req).id, id));
   },
 };

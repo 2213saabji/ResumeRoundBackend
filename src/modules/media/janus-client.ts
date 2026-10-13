@@ -20,7 +20,13 @@ export interface JanusClientOptions {
   tokenSecret?: string;
   /** AudioBridge `admin_key`: needed to create rooms and to forward RTP. */
   audioBridgeAdminKey?: string;
+  /** TextRoom `admin_key`: needed to create caption rooms. */
+  textRoomAdminKey?: string;
 }
+
+/** Plugin error codes for "room already exists" (janus_audiobridge.c, janus_textroom.c). */
+const AUDIOBRIDGE_ROOM_EXISTS = 486;
+const TEXTROOM_ROOM_EXISTS = 418;
 
 /**
  * Minimal client for the Janus HTTP REST transport, used by the backend to manage rooms.
@@ -83,22 +89,35 @@ export class JanusClient {
     }
   }
 
-  /** Synchronous AudioBridge request; throws unless the plugin replies with `expected`. */
-  private async audioBridge(
+  /**
+   * Synchronous plugin request; throws unless the plugin replies with `expected` (or with one
+   * of the `acceptCodes` errors, e.g. "already exists" when creating a room twice).
+   */
+  private async pluginRequest(
+    plugin: typeof AUDIOBRIDGE_PLUGIN | typeof TEXTROOM_PLUGIN,
     body: Record<string, unknown>,
     expected: string,
+    acceptCodes: number[] = [],
   ): Promise<Record<string, unknown>> {
-    return this.withPluginHandle(AUDIOBRIDGE_PLUGIN, async (path) => {
+    const key = plugin === AUDIOBRIDGE_PLUGIN ? 'audiobridge' : 'textroom';
+    return this.withPluginHandle(plugin, async (path) => {
       const res = await this.post(path, { janus: 'message', body });
       const data = res.plugindata?.data;
-      if (!data || data.audiobridge !== expected) {
-        throw new Error(`AudioBridge ${String(body.request)} failed: ${JSON.stringify(data)}`);
-      }
-      return data;
+      if (data && data[key] === expected) return data;
+      if (data && acceptCodes.includes(Number(data.error_code))) return data;
+      throw new Error(`${key} ${String(body.request)} failed: ${JSON.stringify(data)}`);
     });
   }
 
-  /** Creates a private AudioBridge room protected by a per-room secret and PIN. */
+  private audioBridge(body: Record<string, unknown>, expected: string, acceptCodes?: number[]) {
+    return this.pluginRequest(AUDIOBRIDGE_PLUGIN, body, expected, acceptCodes);
+  }
+
+  /**
+   * Creates a private AudioBridge room protected by a per-room secret and PIN. Creating a room
+   * that already exists succeeds, so a rejoin (or a Janus restart, which forgets rooms) can
+   * always call this.
+   */
   async createAudioRoom(opts: {
     roomId: number;
     secret: string;
@@ -122,12 +141,45 @@ export class JanusClient {
         default_prebuffering: 2,
       },
       'created',
+      [AUDIOBRIDGE_ROOM_EXISTS],
     );
     return { roomId: opts.roomId };
   }
 
   async destroyAudioRoom(roomId: number, secret: string): Promise<void> {
     await this.audioBridge({ request: 'destroy', room: roomId, secret }, 'destroyed');
+  }
+
+  /**
+   * Creates the private TextRoom that carries captions and interviewer state for one
+   * interview. Same id, secret and PIN as its audio room. Succeeds if it already exists.
+   */
+  async createTextRoom(opts: { roomId: number; secret: string; pin: string; description: string }) {
+    if (!this.opts.textRoomAdminKey) throw new Error('TEXTROOM_ADMIN_KEY is not configured');
+    await this.pluginRequest(
+      TEXTROOM_PLUGIN,
+      {
+        request: 'create',
+        admin_key: this.opts.textRoomAdminKey,
+        room: opts.roomId,
+        description: opts.description,
+        secret: opts.secret,
+        pin: opts.pin,
+        is_private: true,
+        permanent: false,
+      },
+      'created',
+      [TEXTROOM_ROOM_EXISTS],
+    );
+    return { roomId: opts.roomId };
+  }
+
+  async destroyTextRoom(roomId: number, secret: string): Promise<void> {
+    await this.pluginRequest(
+      TEXTROOM_PLUGIN,
+      { request: 'destroy', room: roomId, secret, permanent: false },
+      'destroyed',
+    );
   }
 
   /**

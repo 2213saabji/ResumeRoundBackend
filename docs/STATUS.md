@@ -8,13 +8,13 @@ _Backend Base Document_.
 
 ## 1. Summary by milestone
 
-| Milestone                          | State | In one line                                                                                                              |
-| ---------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------ |
-| MVP-1 Resume intelligence (wk 1-3) | ✅    | Auth, onboarding, upload, parse job, editable profile all work end to end                                                |
-| MVP-2 Text interview (wk 4-6)      | 🟡    | Typed interview works end to end (`start` / `answers`, AI questions + scoring); question bank and real-AI tuning pending |
-| MVP-3 Evaluation report (wk 7-8)   | 🟡    | Report job, report API, skill history and progress trends done; re-score check on 30 transcripts pending (needs real AI) |
-| MVP-4 Live call (wk 9-12)          | 🔧    | Dev Janus + coturn server running; spike done ([report](spikes/janus-audio-bridge.md)); join API and bot not built yet   |
-| Phase 2 / Phase 3                  | ⬜    | Not started (by plan)                                                                                                    |
+| Milestone                          | State | In one line                                                                                                                             |
+| ---------------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| MVP-1 Resume intelligence (wk 1-3) | ✅    | Auth, onboarding, upload, parse job, editable profile all work end to end                                                               |
+| MVP-2 Text interview (wk 4-6)      | 🟡    | Typed interview works end to end (`start` / `answers`, AI questions + scoring); question bank and real-AI tuning pending                |
+| MVP-3 Evaluation report (wk 7-8)   | 🟡    | Report job, report API, skill history and progress trends done; re-score check on 30 transcripts pending (needs real AI)                |
+| MVP-4 Live call (wk 9-12)          | 🟡    | Voice interview works end to end in dev (join API, bot, Deepgram STT/TTS, captions); barge-in, push-to-talk, reconnect/failover pending |
+| Phase 2 / Phase 3                  | ⬜    | Not started (by plan)                                                                                                                   |
 
 Verification today: 93 automated tests pass (unit + integration on an in-memory MongoDB replica
 set); typecheck, lint and production build are clean. The API has booted against the Atlas
@@ -57,19 +57,19 @@ cluster once successfully.
 | Controller re-orders the plan mid-interview                 | ⬜    |                                                                                            |
 | Trend weights                                               | ⬜    | Phase 3 (FR-11)                                                                            |
 
-### FR-4 Live interview call: ⬜
+### FR-4 Live interview call: 🟡
 
-| Item                                                                               | State | Notes                                                      |
-| ---------------------------------------------------------------------------------- | ----- | ---------------------------------------------------------- |
-| Janus HTTP client (create/destroy AudioBridge room with secret + PIN)              | ✅    | Signed tokens + admin key; checked against the dev server  |
-| `/readyz` checks Janus reachability                                                | ✅    | Skipped while `JANUS_HTTP_URL` is empty                    |
-| Bot process registers + heartbeats every 5 s                                       | ✅    | `bot_instances` collection; least-loaded selection written |
-| `POST /interviews/:id/join` (room, bot assignment, join token, ICE servers)        | ⬜    | Returns 501                                                |
-| Bot joins the room and receives/publishes audio (RTP forward vs Node WebRTC spike) | 🔧    | Spike done: use a WebRTC peer (werift); production bot TBD |
-| Streaming STT / TTS, VAD and push-to-talk, barge-in                                | ⬜    | STT/TTS providers not chosen (PRD open question)           |
-| Live captions and turn state over the data channel                                 | ⬜    |                                                            |
-| Text fallback answers (`POST /interviews/:id/answers`)                             | ✅    | The MVP-2 text loop (see FR-5)                             |
-| Reconnect within 60 s; bot failover from stale heartbeat                           | ⬜    | Data fields and indexes exist; logic not written           |
+| Item                                                                               | State | Notes                                                                                                                                                                                             |
+| ---------------------------------------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Janus HTTP client (create/destroy AudioBridge room with secret + PIN)              | ✅    | Signed tokens + admin key; checked against the dev server                                                                                                                                         |
+| `/readyz` checks Janus reachability                                                | ✅    | Skipped while `JANUS_HTTP_URL` is empty                                                                                                                                                           |
+| Bot process registers + heartbeats every 5 s                                       | ✅    | `bot_instances` collection; least-loaded selection written                                                                                                                                        |
+| `POST /interviews/:id/join` (room, bot assignment, join token, ICE servers)        | ✅    | `src/modules/media/calls.ts`; 409 text mode / not started / ended, 503 not configured / no bot / Janus down                                                                                       |
+| Bot joins the room and receives/publishes audio (RTP forward vs Node WebRTC spike) | ✅    | werift WebRTC peer + Opus (`audio-link.ts`), RTP reorder buffer; checked end to end with `test/e2e/voice-call.ts`                                                                                 |
+| Streaming STT / TTS, VAD and push-to-talk, barge-in                                | 🟡    | Deepgram STT and Aura-2 TTS wired into the bot (`interview-call.ts`): voice gate, word-gap turn-taking, STT flush, streamed sentences, cached acknowledgements. Push-to-talk and barge-in pending |
+| Live captions and turn state over the data channel                                 | ✅    | TextRoom announcements: `state`, `interviewer`, `candidate`, `ended` (FRONTEND_INTEGRATION 7.6)                                                                                                   |
+| Text fallback answers (`POST /interviews/:id/answers`)                             | ✅    | The MVP-2 text loop (see FR-5)                                                                                                                                                                    |
+| Reconnect within 60 s; bot failover from stale heartbeat                           | ⬜    | Data fields and indexes exist; logic not written                                                                                                                                                  |
 
 ### FR-5 Adaptive interviewer: ✅ (text) / 🔧 (real AI)
 
@@ -144,7 +144,7 @@ Phase 2 and Phase 3 by plan. Nothing built. The question model already has `sour
 | `POST /interviews/:id/end`                             | ✅    |                                                                  |
 | `GET /interviews/:id/report`                           | ✅    | ready / generating / insufficient_answers / failed               |
 | `GET /users/me/progress`                               | ✅    | Overall, dimension and skill trends                              |
-| `POST /interviews/:id/join`                            | ⬜    | 501                                                              |
+| `POST /interviews/:id/join`                            | ✅    | MVP-4; needs Janus config and a running bot                      |
 | `POST /interviews/:id/start`                           | ✅    | MVP-2                                                            |
 | `POST /interviews/:id/answers`                         | ✅    | MVP-2; 30 per minute per user                                    |
 | `GET /questions` (admin CRUD)                          | ⬜    | Route not created                                                |
@@ -156,18 +156,18 @@ The frontend contract for everything marked ✅ is in [FRONTEND_INTEGRATION.md](
 
 ## 4. Platform and non-functional requirements
 
-| Area                 | State | Done                                                                                                                                                                                                                         | Pending                                                                                                               |
-| -------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Architecture         | ✅    | Modular monolith, three processes (api, worker, bot), PM2 config, routes → controller → service → repository                                                                                                                 | —                                                                                                                     |
-| No Redis             | ✅    | MongoDB for sessions, rate limits, job queue (claim/lock/backoff/dead-letter), idempotency keys, bot registry; in-process LRU cache                                                                                          | —                                                                                                                     |
-| Security             | 🟡    | helmet, CORS allow-list, zod validation, argon2id, 15-min JWT, refresh rotation with reuse detection, upload magic-byte checks, resume PII hidden by default, S3 server-side encryption + signed URLs, secrets only from env | Janus join tokens and room PINs in use, Dependabot config, data deletion endpoint                                     |
-| Rate limiting        | ✅    | MongoDB TTL limiter on auth, upload and interview creation                                                                                                                                                                   | —                                                                                                                     |
-| Observability        | 🟡    | pino JSON logs with request id, `/healthz` and `/readyz`, AI cost per call in `ai_usage`                                                                                                                                     | OpenTelemetry traces, Sentry, latency/queue metrics, cost dashboard and alerts                                        |
-| AI cost controls     | 🟡    | Model tiers configurable, prompt caching (resume analyzer), per-call metering, monthly free interview quota                                                                                                                  | Per-interview hard cost cap, token budgets per task, "text mode counts less" quota rule, TTS phrase cache, VAD gating |
-| Latency targets      | ⬜    | —                                                                                                                                                                                                                            | Nothing to measure until the live loop exists                                                                         |
-| Availability / scale | ⬜    | Stateless API, horizontally scalable                                                                                                                                                                                         | Load tests (k6), bot capacity test                                                                                    |
-| Privacy              | 🟡    | Resume raw text excluded from default reads                                                                                                                                                                                  | Account deletion, audio encryption/opt-in (with recording)                                                            |
-| Testing              | 🟡    | 93 unit + integration tests, CI workflow (format, lint, typecheck, test, build, audit)                                                                                                                                       | CI `explain()` check for collection scans, AI contract tests on golden transcripts, load tests                        |
+| Area                 | State | Done                                                                                                                                                                                                                         | Pending                                                                                                                                                                      |
+| -------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Architecture         | ✅    | Modular monolith, three processes (api, worker, bot), PM2 config, routes → controller → service → repository                                                                                                                 | —                                                                                                                                                                            |
+| No Redis             | ✅    | MongoDB for sessions, rate limits, job queue (claim/lock/backoff/dead-letter), idempotency keys, bot registry; in-process LRU cache                                                                                          | —                                                                                                                                                                            |
+| Security             | 🟡    | helmet, CORS allow-list, zod validation, argon2id, 15-min JWT, refresh rotation with reuse detection, upload magic-byte checks, resume PII hidden by default, S3 server-side encryption + signed URLs, secrets only from env | Janus join tokens and room PINs in use, Dependabot config, data deletion endpoint                                                                                            |
+| Rate limiting        | ✅    | MongoDB TTL limiter on auth, upload and interview creation                                                                                                                                                                   | —                                                                                                                                                                            |
+| Observability        | 🟡    | pino JSON logs with request id, `/healthz` and `/readyz`, AI cost per call in `ai_usage`                                                                                                                                     | OpenTelemetry traces, Sentry, latency/queue metrics, cost dashboard and alerts                                                                                               |
+| AI cost controls     | 🟡    | Model tiers configurable, prompt caching (resume analyzer), per-call metering, monthly free interview quota                                                                                                                  | Per-interview hard cost cap, token budgets per task, "text mode counts less" quota rule (TTS phrase cache, VAD gating and speech metering are built in `src/modules/speech`) |
+| Latency targets      | ⬜    | —                                                                                                                                                                                                                            | Nothing to measure until the live loop exists                                                                                                                                |
+| Availability / scale | ⬜    | Stateless API, horizontally scalable                                                                                                                                                                                         | Load tests (k6), bot capacity test                                                                                                                                           |
+| Privacy              | 🟡    | Resume raw text excluded from default reads                                                                                                                                                                                  | Account deletion, audio encryption/opt-in (with recording)                                                                                                                   |
+| Testing              | 🟡    | 93 unit + integration tests, CI workflow (format, lint, typecheck, test, build, audit)                                                                                                                                       | CI `explain()` check for collection scans, AI contract tests on golden transcripts, load tests                                                                               |
 
 ## 5. Data model (MongoDB collections)
 
@@ -190,12 +190,12 @@ Added beyond the PRD:
 | ------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | MongoDB Atlas             | 🟡    | Connected once. Add the dev machine's IP in Network Access; if `querySrv ECONNREFUSED` appears, switch DNS to 8.8.8.8 or use the non-SRV connection string. Create a separate dev database instead of using `resumeroundprod` locally. Rotate the DB password (it was shared in chat) |
 | Atlas Vector Search index | ⬜    | Create `questions_embedding` per [atlas-vector-search.md](atlas-vector-search.md) once the embedding model is chosen                                                                                                                                                                  |
-| Anthropic API key         | ⬜    | Set `AI_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`; until then the mock analyzer is used                                                                                                                                                                                             |
+| LLM (Ollama)              | 🟡    | Runs locally in dev (`AI_PROVIDER=ollama`, `OLLAMA_MODEL`, `OLLAMA_NUM_CTX=8192` on the laptop). Production needs a GPU server for Ollama, reachable only from the API/worker/bot (never expose port 11434). Claude provider stays in the code but is not used                        |
 | S3 bucket (or R2/MinIO)   | ⬜    | Private bucket + credentials; set `STORAGE_DRIVER=s3` and `S3_*`                                                                                                                                                                                                                      |
 | Google OAuth client       | ⬜    | Create a Web client id; set `GOOGLE_CLIENT_ID` (backend) and `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (frontend)                                                                                                                                                                                |
 | Linux VM + PM2            | ⬜    | `npm ci && npm run build && npm run db:sync-indexes`, then `pm2 start ecosystem.config.cjs --env production`                                                                                                                                                                          |
 | Janus + coturn VM         | 🟡    | Dev server running (AWS, Sydney; see [DEVOPS.md](DEVOPS.md)). Production: Mumbai, compute-optimised instance, TLS with the domain                                                                                                                                                     |
-| STT / TTS providers       | ⬜    | PRD open question; needed for MVP-4                                                                                                                                                                                                                                                   |
+| STT / TTS providers       | ✅    | Deepgram Nova-3 (STT) and Deepgram Aura-2 (TTS), one key, English; used by the bot. Rotate the key (it was shared in chat). Google Chirp 3 HD stays available (needs a ₹1,000 prepaid Google Cloud account)                                                                           |
 | Sentry project            | ⬜    | DSN for error tracking                                                                                                                                                                                                                                                                |
 | Production cookies        | ⬜    | If the frontend and API are on different sites: `COOKIE_SAMESITE=none`, `COOKIE_SECURE=true`, and the Vercel URL in `CORS_ORIGINS`                                                                                                                                                    |
 
@@ -214,13 +214,15 @@ Added beyond the PRD:
 
 ## 8. Suggested next steps
 
-1. **Unblock MVP-1 for real use:** Anthropic key, S3 bucket, Google client id; then measure
-   extraction precision on ~50 resumes.
-2. **Finish MVP-2:** run real interviews with `AI_PROVIDER=anthropic`, tune the interviewer and
+1. **Unblock MVP-1 for real use:** S3 bucket, Google client id; then measure extraction
+   precision on ~50 resumes with Ollama.
+2. **Finish MVP-2:** run real interviews with `AI_PROVIDER=ollama` (a larger model on a GPU
+   server), tune the interviewer and
    evaluator prompts, and check the "follow-ups feel realistic ≥ 4/5" exit criterion with internal
    testers. Then the question bank: embeddings, the vector index, ~100 seed scenarios and rubrics.
 3. **Finish MVP-3:** with the real AI, build 30 golden transcripts, check the re-score delta
    (≤ 0.5) and report latency (≤ 60 s), and review report quality.
-4. **MVP-4:** the spike is done ([report](spikes/janus-audio-bridge.md)). Next: the browser check
-   on the test page, then `POST /interviews/:id/join` and the bot joining with a WebRTC peer.
+4. **MVP-4:** the voice call works in dev. Next: frontend room, then latency (2.5-4 s replies
+   from the dev laptop), occasional dropped words on lossy networks, the bot waiting for the
+   candidate before the first question, reconnect/failover, push-to-talk and barge-in.
 5. **Before beta:** account deletion, Sentry, per-interview cost cap, list endpoints for the frontend.

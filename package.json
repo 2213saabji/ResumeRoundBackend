@@ -59,9 +59,11 @@
     "mammoth": "^1.13.0",
     "mongoose": "^9.11.1",
     "multer": "^2.4.0",
+    "opusscript": "^0.1.1",
     "pdf-parse": "^2.4.5",
     "pino": "^10.4.0",
     "pino-http": "^11.0.0",
+    "werift": "^0.25.0",
     "zod": "^4.6.5"
   },
   "private": true,

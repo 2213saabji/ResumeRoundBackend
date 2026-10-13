@@ -46,12 +46,35 @@ const envSchema = z.object({
   S3_ACCESS_KEY_ID: optionalString,
   S3_SECRET_ACCESS_KEY: optionalString,
 
-  AI_PROVIDER: z.enum(['mock', 'anthropic']).default('mock'),
+  AI_PROVIDER: z.enum(['mock', 'anthropic', 'ollama']).default('mock'),
   ANTHROPIC_API_KEY: optionalString,
   AI_MODEL_SMALL: z.string().default('claude-haiku-4-5'),
   AI_MODEL_MID: z.string().default('claude-sonnet-5-5'),
   AI_MODEL_LARGE: z.string().default('claude-opus-5-5'),
   AI_INTERVIEW_COST_TARGET_USD: z.coerce.number().positive().default(0.75),
+  // 127.0.0.1, not localhost: Node may resolve localhost to IPv6 (::1), where Ollama does not listen.
+  OLLAMA_URL: z.string().url().default('http://127.0.0.1:11434'),
+  OLLAMA_API_KEY: optionalString,
+  /** Used for every task unless a per-tier model below is set. */
+  OLLAMA_MODEL: z.string().default('qwen2.5:3b'),
+  OLLAMA_MODEL_SMALL: optionalString,
+  OLLAMA_MODEL_MID: optionalString,
+  OLLAMA_MODEL_LARGE: optionalString,
+  OLLAMA_NUM_CTX: z.coerce.number().int().min(2048).default(16_384),
+  OLLAMA_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+
+  STT_PROVIDER: z.enum(['mock', 'deepgram']).default('mock'),
+  DEEPGRAM_API_KEY: optionalString,
+  STT_MODEL: z.string().default('nova-3'),
+  STT_LANGUAGE: z.string().default('en'),
+  STT_ENDPOINTING_MS: z.coerce.number().int().positive().default(500),
+  STT_UTTERANCE_END_MS: z.coerce.number().int().min(1000).default(1000),
+  TTS_PROVIDER: z.enum(['mock', 'deepgram', 'google']).default('mock'),
+  GOOGLE_TTS_API_KEY: optionalString,
+  /** Defaults per provider: see DEFAULT_TTS_VOICE. */
+  TTS_VOICE: optionalString,
+  /** Google only. */
+  TTS_SPEAKING_RATE: z.coerce.number().min(0.25).max(2).default(1),
 
   FREE_INTERVIEWS_PER_MONTH: z.coerce.number().int().nonnegative().default(5),
 
@@ -61,6 +84,13 @@ const envSchema = z.object({
   JOB_CONCURRENCY: z.coerce.number().int().positive().default(4),
   BOT_HEARTBEAT_MS: z.coerce.number().int().positive().default(5_000),
   BOT_CAPACITY: z.coerce.number().int().positive().default(25),
+  /** How often the bot looks for new calls and each call re-reads its interview. */
+  BOT_POLL_MS: z.coerce.number().int().positive().default(1_000),
+  /** Silence after the candidate's last word (beyond the ~1 s utterance end) that ends an answer. */
+  BOT_TURN_END_MS: z.coerce.number().int().nonnegative().default(300),
+  /** Answers shorter than BOT_MIN_ANSWER_WORDS ("let me think") wait this long instead. */
+  BOT_SHORT_ANSWER_WAIT_MS: z.coerce.number().int().nonnegative().default(6_000),
+  BOT_MIN_ANSWER_WORDS: z.coerce.number().int().nonnegative().default(4),
 
   JANUS_HTTP_URL: optionalString,
   JANUS_WS_URL: optionalString,
@@ -93,6 +123,21 @@ function loadConfig(): Config {
       'Invalid environment configuration: ANTHROPIC_API_KEY is required when AI_PROVIDER=anthropic',
     );
   }
+  if (cfg.STT_PROVIDER === 'deepgram' && !cfg.DEEPGRAM_API_KEY) {
+    throw new Error(
+      'Invalid environment configuration: DEEPGRAM_API_KEY is required when STT_PROVIDER=deepgram',
+    );
+  }
+  if (cfg.TTS_PROVIDER === 'deepgram' && !cfg.DEEPGRAM_API_KEY) {
+    throw new Error(
+      'Invalid environment configuration: DEEPGRAM_API_KEY is required when TTS_PROVIDER=deepgram',
+    );
+  }
+  if (cfg.TTS_PROVIDER === 'google' && !cfg.GOOGLE_TTS_API_KEY) {
+    throw new Error(
+      'Invalid environment configuration: GOOGLE_TTS_API_KEY is required when TTS_PROVIDER=google',
+    );
+  }
   if (cfg.JANUS_HTTP_URL && !cfg.JANUS_TOKEN_SECRET) {
     throw new Error(
       'Invalid environment configuration: JANUS_TOKEN_SECRET is required when JANUS_HTTP_URL is set',
@@ -112,5 +157,11 @@ function loadConfig(): Config {
 }
 
 export const config = loadConfig();
+
+/** Voice used when TTS_VOICE is not set. */
+export const DEFAULT_TTS_VOICE = {
+  deepgram: 'aura-2-thalia-en',
+  google: 'en-IN-Chirp3-HD-Kore',
+} as const;
 export const isProd = config.NODE_ENV === 'production';
 export const isTest = config.NODE_ENV === 'test';

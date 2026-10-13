@@ -3,11 +3,11 @@
 Backend for the AI resume-based interview simulator: one TypeScript codebase (Node.js 22,
 Express 5, MongoDB) that runs as three processes.
 
-| Process  | Entry point          | Responsibility                                                           |
-| -------- | -------------------- | ------------------------------------------------------------------------ |
-| `api`    | `src/apps/api.ts`    | REST API under `/api/v1`: auth, resumes, profiles, interviews, reports   |
-| `worker` | `src/apps/worker.ts` | Background jobs from the MongoDB queue (resume parsing, reports)         |
-| `bot`    | `src/apps/bot.ts`    | Live interview bot (registers + heartbeats today; Janus bridge in MVP-4) |
+| Process  | Entry point          | Responsibility                                                               |
+| -------- | -------------------- | ---------------------------------------------------------------------------- |
+| `api`    | `src/apps/api.ts`    | REST API under `/api/v1`: auth, resumes, profiles, interviews, reports       |
+| `worker` | `src/apps/worker.ts` | Background jobs from the MongoDB queue (resume parsing, reports)             |
+| `bot`    | `src/apps/bot.ts`    | Live interview bot: joins Janus rooms, speaks questions, transcribes answers |
 
 Project started 07/10/2026.
 
@@ -36,8 +36,12 @@ Connect → Drivers (it lists the servers directly, but must be updated if Atlas
 
 With `AI_PROVIDER=mock` and `STORAGE_DRIVER=local` (the defaults) nothing else is needed: resumes
 are stored under `.storage/` and parsed by a keyword-based mock analyzer. Set
-`AI_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` for real resume analysis, and `STORAGE_DRIVER=s3`
-with the `S3_*` variables for object storage.
+`AI_PROVIDER=ollama` (with [Ollama](https://ollama.com) running and `OLLAMA_MODEL` pulled) for real
+AI, and `STORAGE_DRIVER=s3` with the `S3_*` variables for object storage.
+
+Voice interviews also need the `JANUS_*` / `TURN_*` settings (see [docs/DEVOPS.md](docs/DEVOPS.md)),
+`STT_PROVIDER=deepgram`, `TTS_PROVIDER=deepgram` and `DEEPGRAM_API_KEY`, and the bot running
+(`npm run dev:bot`) next to `npm run dev`.
 
 ## Scripts
 
@@ -104,7 +108,9 @@ The `questions.embedding` vector index is created in Atlas, not by Mongoose; see
 ## AI gateway
 
 All AI calls go through `src/modules/ai` (`getAiGateway()`); providers are chosen by
-`AI_PROVIDER`. Model tiers are configurable: `AI_MODEL_SMALL` (`claude-haiku-4-5`, latency-critical
+`AI_PROVIDER`: `ollama` (the one in use; `OLLAMA_MODEL` or per-tier `OLLAMA_MODEL_SMALL` /
+`_MID` / `_LARGE`, JSON-schema constrained output, cost recorded as $0), `mock`, or `anthropic`
+(kept but unused). Model tiers are configurable: `AI_MODEL_SMALL` (`claude-haiku-4-5`, latency-critical
 phrasing), `AI_MODEL_MID` (`claude-sonnet-5-5`, resume extraction and per-turn evaluation),
 `AI_MODEL_LARGE` (`claude-opus-5-5`, final report). Resume analysis uses structured outputs
 validated by zod, a byte-stable cached system prompt, resume text passed as delimited data, and
@@ -119,7 +125,7 @@ Feature-by-feature detail, deviations and pending setup: [docs/STATUS.md](docs/S
 | MVP-1 Resume intelligence | Done: auth (email/password, Google, refresh rotation), onboarding, upload, parse job, editable profile                                    |
 | MVP-2 Text interview      | Typed interview works end to end: `POST /interviews/:id/start` and `/answers` (AI question + scoring + controller); question bank pending |
 | MVP-3 Evaluation report   | Report job, report API (ready / generating / insufficient answers / failed), skill history and progress trends done                       |
-| MVP-4 Live call           | Janus HTTP client + bot registry/heartbeat done; `POST /interviews/:id/join`, RTP/WebRTC bridge, STT/TTS pending (501)                    |
+| MVP-4 Live call           | Works in dev: `POST /interviews/:id/join`, bot over WebRTC, Deepgram STT/TTS, captions; barge-in, push-to-talk, reconnect pending         |
 
 ## Deployment
 

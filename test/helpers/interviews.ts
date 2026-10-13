@@ -12,8 +12,11 @@ export interface InterviewCtx {
   userId: string;
 }
 
-/** A user with a parsed profile and a created (not started) 15-minute text interview. */
-export async function createdInterview(app: App): Promise<InterviewCtx> {
+/** A user with a parsed profile and a created (not started) 15-minute interview. */
+export async function createdInterview(
+  app: App,
+  mode: 'text' | 'voice' = 'text',
+): Promise<InterviewCtx> {
   const user = await registerUser(app);
   const auth = { Authorization: `Bearer ${user.accessToken}` };
   await request(app)
@@ -43,12 +46,12 @@ export async function createdInterview(app: App): Promise<InterviewCtx> {
   const res = await request(app)
     .post('/api/v1/interviews')
     .set(auth)
-    .send({ durationMin: 15, mode: 'text' });
+    .send({ durationMin: 15, mode });
   return { auth, id: res.body.interview.id as string, userId: user.userId };
 }
 
-export async function startedInterview(app: App) {
-  const ctx = await createdInterview(app);
+export async function startedInterview(app: App, mode: 'text' | 'voice' = 'text') {
+  const ctx = await createdInterview(app, mode);
   const res = await request(app).post(`/api/v1/interviews/${ctx.id}/start`).set(ctx.auth);
   return { ...ctx, start: res };
 }

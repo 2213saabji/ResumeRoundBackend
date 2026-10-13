@@ -37,6 +37,14 @@ export const botRegistry = {
     await BotInstanceModel.deleteOne({ botId });
   },
 
+  async isAlive(botId: string, staleAfterMs: number): Promise<boolean> {
+    const bot = await BotInstanceModel.exists({
+      botId,
+      lastSeenAt: { $gte: new Date(Date.now() - staleAfterMs) },
+    });
+    return bot !== null;
+  },
+
   /** Least-loaded bot that heartbeated recently and has spare capacity. */
   pickLeastLoaded(staleAfterMs: number): Promise<BotInstance | null> {
     return BotInstanceModel.findOne({

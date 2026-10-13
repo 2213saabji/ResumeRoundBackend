@@ -53,8 +53,13 @@ const interviewSchema = new Schema(
     plan: { type: [objectiveSchema], default: [] },
     // Embedded because it is read and written together with the interview, every turn.
     state: { type: interviewStateSchema, required: true },
+    // Live call (voice mode): one private AudioBridge room for audio and a TextRoom with the
+    // same id for captions. The secret and PIN never leave the backend except the PIN, which
+    // goes to the candidate's browser in the join response.
     janus: {
       roomId: { type: Number },
+      roomSecret: { type: String },
+      roomPin: { type: String },
       botId: { type: String },
       botLastSeenAt: { type: Date },
     },

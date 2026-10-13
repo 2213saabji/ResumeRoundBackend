@@ -51,6 +51,50 @@ export const interviewsRepository = {
     return res.modifiedCount === 1;
   },
 
+  /**
+   * Stores the call room the first time an interview is joined. Returns false if another
+   * request stored one first (the caller reloads and uses that). Does not bump `version`:
+   * call details are not interview state.
+   */
+  async claimCallRoom(
+    id: string,
+    room: { roomId: number; roomSecret: string; roomPin: string },
+  ): Promise<boolean> {
+    const res = await InterviewModel.updateOne(
+      { _id: id, 'janus.roomId': { $exists: false } },
+      {
+        $set: {
+          'janus.roomId': room.roomId,
+          'janus.roomSecret': room.roomSecret,
+          'janus.roomPin': room.roomPin,
+        },
+      },
+    );
+    return res.modifiedCount === 1;
+  },
+
+  async assignBot(id: string, botId: string): Promise<void> {
+    await InterviewModel.updateOne(
+      { _id: id },
+      { $set: { 'janus.botId': botId, 'janus.botLastSeenAt': new Date() } },
+    );
+  },
+
+  /** Live voice interviews this bot owns (the bot polls this to pick up and follow calls). */
+  findLiveForBot(botId: string): Promise<Interview[]> {
+    return InterviewModel.find({ 'janus.botId': botId, status: 'in_progress', mode: 'voice' }).lean<
+      Interview[]
+    >();
+  },
+
+  async touchBot(ids: string[], botId: string): Promise<void> {
+    if (ids.length === 0) return;
+    await InterviewModel.updateMany(
+      { _id: { $in: ids }, 'janus.botId': botId },
+      { $set: { 'janus.botLastSeenAt': new Date() } },
+    );
+  },
+
   findForUser(id: string, userId: string): Promise<Interview | null> {
     return InterviewModel.findOne({ _id: id, userId }).lean<Interview>();
   },
