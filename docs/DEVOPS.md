@@ -4,7 +4,7 @@ Living record of how ResumeRound's servers are set up, **why** each choice was m
 costs, and how to cut costs later. Review it before changing infrastructure, and when the AWS free
 tier or credits run out.
 
-Last updated: 09 Oct 2026 · Stage: **dev / MVP-4 spike server** (no production traffic yet).
+Last updated: 13 Oct 2026 · Stage: **dev / MVP-4 spike server** (no production traffic yet).
 
 > **Prices are approximate** on-demand rates for Mumbai (`ap-south-1`) as of Oct 2026, rounded,
 > excluding tax. Always confirm on the AWS pricing pages or in Cost Explorer before deciding.
@@ -18,7 +18,7 @@ Last updated: 09 Oct 2026 · Stage: **dev / MVP-4 spike server** (no production 
 | Frontend (Next.js)                               | Developer laptops (`localhost:3000`); Vercel later                                                    |                                                             |
 | Backend API + job worker                         | Developer laptops (`npm run dev`)                                                                     | Connects to Atlas and to Janus on AWS                       |
 | MongoDB                                          | MongoDB Atlas, cluster `ResumeRoundCluster`                                                           | Managed; dev and prod databases on the same cluster for now |
-| Janus (WebRTC media server) + coturn (STUN/TURN) | **AWS EC2** `resumeround-janus-dev` (`i-0df4291341438b121`, Elastic IP `16.178.17.240`, `ap-south-1`) | Shared dev server; also hosts the MVP-4 spike               |
+| Janus (WebRTC media server) + coturn (STUN/TURN) | **AWS EC2** `resumeround-janus-dev` (`i-0e9292245a9e722cc`, Elastic IP `65.0.150.152`, `ap-south-1b`) | Shared dev server; also hosts the MVP-4 spike               |
 | AI bot (spike prototypes)                        | AWS EC2, next to Janus                                                                                | See section 3 for why                                       |
 | Object storage                                   | Local disk (`STORAGE_DRIVER=local`)                                                                   | S3 bucket not created yet                                   |
 | AI provider                                      | Mock (`AI_PROVIDER=mock`)                                                                             | No Anthropic key yet                                        |
@@ -161,7 +161,7 @@ Verified from a developer laptop: HTTP 8088 and WebSocket 8188 reachable, STUN o
 
 | Credential                    | Needed for                            | Status                                                     | Where it lives                                                         |
 | ----------------------------- | ------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------- |
-| AWS account (console login)   | Creating and managing servers         | ✅ In use                                                  | Owner only; enable MFA                                                 |
+| AWS account (console login)   | Creating and managing servers         | ✅ In use                                                  | Root: owner only, billing only, MFA. Daily work: IAM admin user (MFA)  |
 | EC2 key pair `.pem`           | SSH to the dev server                 | ✅ Created during setup                                    | Laptop `~/.ssh`, never in the repo                                     |
 | MongoDB Atlas user            | Database                              | ✅ In use                                                  | `.env` (git-ignored). **Rotate the password**: it was shared in a chat |
 | Janus API secret / admin key  | Backend ↔ Janus                       | Set during installation                                    | Server config + backend `.env`                                         |
@@ -220,14 +220,15 @@ text-to-speech once volume justifies it.
 
 ## 8. Day-to-day operations
 
-| Task                              | How                                                                                               |
-| --------------------------------- | ------------------------------------------------------------------------------------------------- |
-| SSH into the server               | `ssh -i D:\ResumeRound\AWS\resumeround-dev-key-pair.pem ubuntu@16.178.17.240`                     |
-| SSH or Janus suddenly unreachable | Your IP probably changed: update the developer rules in the security group                        |
-| Stop / start to save money        | EC2 → Instances → select → Instance state → Stop / Start (the Elastic IP stays)                   |
-| See what you are paying           | Billing → Cost Explorer, filter by service                                                        |
-| Give a teammate access            | Add their public SSH key on the server and their IP to the security group; never share the `.pem` |
-| Disk filling up                   | `df -h` on the server; increase the volume in EC2 → Volumes → Modify, then grow the filesystem    |
+| Task                                 | How                                                                                                                   |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| SSH into the server                  | `ssh -i D:\ResumeRound\AWS\resumeround-dev-key-pair.pem ubuntu@65.0.150.152`                                          |
+| SSH says "bad permissions" (Windows) | `icacls <key.pem> /inheritance:r /grant:r "%USERNAME%:(R)"`, then remove any other users listed by `icacls <key.pem>` |
+| SSH or Janus suddenly unreachable    | Your IP probably changed: update the developer rules in the security group                                            |
+| Stop / start to save money           | EC2 → Instances → select → Instance state → Stop / Start (the Elastic IP stays)                                       |
+| See what you are paying              | Billing → Cost Explorer, filter by service                                                                            |
+| Give a teammate access               | Add their public SSH key on the server and their IP to the security group; never share the `.pem`                     |
+| Disk filling up                      | `df -h` on the server; increase the volume in EC2 → Volumes → Modify, then grow the filesystem                        |
 
 ---
 
@@ -249,10 +250,42 @@ text-to-speech once volume justifies it.
 
 - [x] Developer ports: opened to Anywhere for the dev phase (13 Oct 2026); close 22 and 8088
       before production (section 4.7).
-- [ ] Create the budget alert.
+- [x] Budget alert `resumeround-monthly`: $20/month, email at 85% and 100% actual and 100%
+      forecast (13 Oct 2026).
 - [ ] After the spike: decide x86 vs Arm (`t4g`) and EC2 vs Lightsail for dev.
-- [ ] DNS: point a subdomain (e.g. `janus-dev.<domain>`) at `16.178.17.240`.
+- [ ] DNS: point a subdomain (e.g. `janus-dev.<domain>`) at `65.0.150.152`.
 - [ ] Rotate the MongoDB Atlas password.
 - [x] Speech providers: Deepgram Nova-3 (STT) and Aura-2 (TTS) for launch; self-host on a GPU
       server once STT + TTS spend passes about $500/month.
 - [ ] Rotate the Deepgram key (it was pasted in a chat).
+- [x] MFA on the root user and on the IAM admin user (13 Oct 2026).
+- [x] AWS credits (13 Oct 2026): $120 ($100 Free Tier + $20 for the budget activity), both
+      expire **07 Oct 2027**; ~$117.55 left. Lasts ~5.5 months at 24×7 (~$21.50/month), or until
+      expiry if the server is stopped outside working hours. Check Billing → Credits monthly.
+- [ ] Remaining "Explore AWS" activities on Console Home ($20 each: EC2, Bedrock, Lambda, RDS).
+      Delete any RDS database right after, so it does not bill.
+
+---
+
+## 11. Rebuilding the dev server from scratch
+
+Order matters: **attach the Elastic IP before running `setup.sh`**. The script reads the public IP
+from instance metadata and writes it into the Janus (`nat_1_1_mapping`) and coturn configs.
+
+1. Console, region `ap-south-1`: import the key pair from `resumeround-dev-key-pair.pub`
+   (EC2 → Key Pairs → Import), create the security group (section 4.7).
+2. Launch: Ubuntu 24.04 x86, `t3.small`, 20 GiB gp3, that security group, metadata **V2 only**
+   and **accessible** (setup.sh needs it).
+3. Allocate an Elastic IP and associate it with the instance.
+4. From the repo root: `scp -r infra/dev-server` to the server, then `sudo bash ~/dev-server/setup.sh`.
+5. Copy the new secrets from `/etc/resumeround/secrets.env` and the new IP into the backend `.env`
+   (`JANUS_*`, `AUDIOBRIDGE_ADMIN_KEY`, `TEXTROOM_ADMIN_KEY`, `TURN_*`, `SPIKE_ROOM_SECRET`).
+6. Check from a laptop: `GET http://<ip>:8088/janus/info` returns 200, TCP 8188 connects, a STUN
+   request to UDP 3478 is answered; create and destroy a room with the backend `JanusClient`.
+7. Update the instance ID and IP in this document.
+
+## 12. Incident log
+
+| Date        | What happened                                                                                                                                  | Impact                                                       | Follow-up                                                          |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------ |
+| 13 Oct 2026 | Activating the AWS account (upgrade from the not-yet-activated account) removed every resource: instance, Elastic IP, security group, key pair | Dev server and its secrets lost; old IP `16.178.17.240` gone | Rebuilt in Mumbai the same day (section 11); new secrets in `.env` |
