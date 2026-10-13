@@ -194,7 +194,7 @@ Added beyond the PRD:
 | S3 bucket (or R2/MinIO)   | ⬜    | Private bucket + credentials; set `STORAGE_DRIVER=s3` and `S3_*`                                                                                                                                                                                                                      |
 | Google OAuth client       | ⬜    | Create a Web client id; set `GOOGLE_CLIENT_ID` (backend) and `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (frontend)                                                                                                                                                                                |
 | Linux VM + PM2            | ⬜    | `npm ci && npm run build && npm run db:sync-indexes`, then `pm2 start ecosystem.config.cjs --env production`                                                                                                                                                                          |
-| Janus + coturn VM         | 🟡    | Dev server running (AWS, Sydney; see [DEVOPS.md](DEVOPS.md)). Production: Mumbai, compute-optimised instance, TLS with the domain                                                                                                                                                     |
+| Janus + coturn VM         | 🟡    | Dev server running (AWS Mumbai `ap-south-1`, rebuilt 13 Oct 2026; see [DEVOPS.md](DEVOPS.md)). Production: compute-optimised instance, TLS with the domain                                                                                                                            |
 | STT / TTS providers       | ✅    | Deepgram Nova-3 (STT) and Deepgram Aura-2 (TTS), one key, English; used by the bot. Rotate the key (it was shared in chat). Google Chirp 3 HD stays available (needs a ₹1,000 prepaid Google Cloud account)                                                                           |
 | Sentry project            | ⬜    | DSN for error tracking                                                                                                                                                                                                                                                                |
 | Production cookies        | ⬜    | If the frontend and API are on different sites: `COOKIE_SAMESITE=none`, `COOKIE_SECURE=true`, and the Vercel URL in `CORS_ORIGINS`                                                                                                                                                    |
@@ -223,6 +223,6 @@ Added beyond the PRD:
 3. **Finish MVP-3:** with the real AI, build 30 golden transcripts, check the re-score delta
    (≤ 0.5) and report latency (≤ 60 s), and review report quality.
 4. **MVP-4:** the voice call works in dev. Next: frontend room, then latency (2.5-4 s replies
-   from the dev laptop), occasional dropped words on lossy networks, the bot waiting for the
+   from the dev laptop with Janus in Sydney; re-measure now that it is in Mumbai), occasional dropped words on lossy networks, the bot waiting for the
    candidate before the first question, reconnect/failover, push-to-talk and barge-in.
 5. **Before beta:** account deletion, Sentry, per-interview cost cap, list endpoints for the frontend.
